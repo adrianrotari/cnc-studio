@@ -72,5 +72,52 @@ const n25=S.find(s=>/^N25/.test(s.name));
 const sh=n25.segs.find(sg=>sg.kind==='feed');
 ok(sh && Math.abs(sh.pts[1][0]-1)<1e-9 && Math.abs(sh.pts[1][1]+1)<1e-9,'G52 X1 Y-1 shift applied');
 
+// ---- subprogram inlining (v0.2): M98/G65 O-file resolution ----
+const SUB100=`O0100(SUBPROG - 10x10 SQUARE)
+G01X10.F150.
+G01Y10.
+G01X0.
+G01Y0.
+M99`;
+const MAIN=`%
+O0002(MAIN)
+N5(POCKET)
+( T2002 EB12)
+G17G54
+G00X0Y0Z5.
+G01Z-2.F100.
+M98P100L2
+G00Z5.
+N10(FINISH)
+G00X0Y0Z5.
+M98P0100
+G00Z5.
+M30
+%`;
+// no O-file supplied -> call stays an unresolved warning, no geometry
+const U=parseNC(MAIN);
+const u5=U.find(s=>/^N5/.test(s.name));
+ok(u5 && u5.calls.includes('O100'),'M98P100 unresolved -> warning, got '+(u5&&JSON.stringify(u5.calls)));
+ok(u5 && !u5.resolvedCalls,'no resolvedCalls without subs');
+// O-file supplied -> call resolves and plots inline
+const R=parseNC(MAIN,{subs:{100:SUB100}});
+ok(R.length===U.length,'op count unchanged by inlining, got '+R.length+' vs '+U.length);
+const r5=R.find(s=>/^N5/.test(s.name));
+ok(r5 && !r5.calls.length,'no warning once inlined, got '+(r5&&JSON.stringify(r5.calls)));
+ok(r5 && r5.resolvedCalls && r5.resolvedCalls[0]==='O100 ×2','N5 resolved O100 ×2, got '+(r5&&JSON.stringify(r5.resolvedCalls)));
+const subsegs=r5.segs.filter(sg=>sg.sub==='O100');
+ok(subsegs.length>0,'N5 has inlined sub segments, got '+subsegs.length);
+// L2 -> two passes of a 10x10 square perimeter (40 mm each) = 80 mm of feed from the sub
+const subfeed=subsegs.filter(sg=>sg.kind==='feed').reduce((a,sg)=>a+sg.len,0);
+ok(Math.abs(subfeed-80)<1e-6,'two passes of 40mm square = 80, got '+subfeed.toFixed(2));
+// inlined segments attribute to the M98 call line in the MAIN file (source readout stays meaningful)
+const callLine=MAIN.split(/\r?\n/).findIndex(l=>/M98P100/.test(l))+1;
+ok(subsegs.every(sg=>sg.line===callLine),'sub segs carry the call-site line '+callLine);
+// M99 return + single call (no L) => one pass
+const r10=R.find(s=>/^N10/.test(s.name));
+ok(r10 && r10.resolvedCalls && r10.resolvedCalls[0]==='O100','N10 resolved O100 single, got '+(r10&&JSON.stringify(r10.resolvedCalls)));
+const r10feed=r10.segs.filter(sg=>sg.sub==='O100'&&sg.kind==='feed').reduce((a,sg)=>a+sg.len,0);
+ok(Math.abs(r10feed-40)<1e-6,'N10 single pass = 40, got '+r10feed.toFixed(2));
+
 console.log(`parser tests: ${pass} passed, ${fail} failed`);
 process.exit(fail?1:0);

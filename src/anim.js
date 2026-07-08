@@ -39,7 +39,7 @@ function stepAnim(force){
   if(STK.on&&STK.grid) stampTo(tlPos);
   updateCut(e);
   document.getElementById('readout').innerHTML=
-    `<b>${e.sec.name}</b> · <span class="src">L${e.sg.line}</span> <b>${(e.sg.src||'').slice(0,70)}</b>`+
+    `<b>${e.sec.name}</b> · <span class="src">L${e.sg.line}</span>${e.sg.sub?` <span class="sub">${e.sg.sub}</span>`:''} <b>${(e.sg.src||'').slice(0,70)}</b>`+
     ` · ${e.sg.kind==='rapid'?'RAPID':e.sg.kind==='cycle'?'CYCLE':'F'+(e.sg.f??'—')}`+
     `${e.sg.s?' · S'+e.sg.s:''} · X${fmt(p[0],2)} Y${fmt(p[1],2)} Z${fmt(p[2],2)}`;
 }

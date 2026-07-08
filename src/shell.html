@@ -34,6 +34,7 @@
   .badge.tool{color:var(--acc);border-color:#1c4a5e}
   .badge.warn{color:var(--org);border-color:#5e441c}
   .badge.rough{color:var(--grn);border-color:#1c5e35}
+  .badge.sub{color:var(--acc);border-color:#1c4a5e}
   #view{position:relative;min-width:0;min-height:0}
   #cv{position:absolute;inset:0;width:100%;height:100%;display:block}
   #hud{position:absolute;top:8px;left:10px;font-family:Consolas,monospace;font-size:11px;color:var(--dim);pointer-events:none;text-shadow:0 1px 2px #000}
@@ -50,6 +51,7 @@
   #readout{font-family:Consolas,monospace;font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #readout b{color:var(--tx);font-weight:600}
   #readout .src{color:var(--grn)}
+  #readout .sub{color:var(--acc)}
   input[type=file]{display:none}
   #chat{position:absolute;top:0;right:0;bottom:0;width:370px;background:#0e141dee;border-left:1px solid var(--line);display:none;flex-direction:column;z-index:20}
   #chat.open{display:flex}
@@ -117,7 +119,7 @@
       <button class="btn" data-v="right">Right</button>
       <button class="btn" data-v="fit">Fit</button>
     </div>
-    <div id="drop">drop the .dnc and .stp here<br><span class="sm">LMB rotate · RMB / Shift pan · wheel zoom</span></div>
+    <div id="drop">drop the .dnc and .stp here — then drop called subprogram O-files to inline M98/G65<br><span class="sm">LMB rotate · RMB / Shift pan · wheel zoom</span></div>
     <div id="stepbox">
       <b style="color:var(--acc)">STEP model</b>
       <div class="row"><label>opacity</label><input type="range" id="stOp" min="5" max="100" value="35" style="flex:1"></div>

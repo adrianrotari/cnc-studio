@@ -43,12 +43,20 @@ document.querySelectorAll('#stepbox [data-r]').forEach(b=>b.onclick=()=>{stepGro
 // ---------------- file handling ----------------
 function routeFile(file){
   const ext=file.name.split('.').pop().toLowerCase();
-  if(ext==='stp'||ext==='step'){ file.arrayBuffer().then(b=>loadSTEP(b,file.name)); }
-  else{
-    const rd=new FileReader();
-    rd.onload=()=>loadNC(rd.result,file.name);
-    rd.readAsText(file,'ISO-8859-1');
-  }
+  if(ext==='stp'||ext==='step'){ file.arrayBuffer().then(b=>loadSTEP(b,file.name)); return; }
+  const rd=new FileReader();
+  rd.onload=()=>handleNC(rd.result,file.name);
+  rd.readAsText(file,'ISO-8859-1');
+}
+// First NC file is the main program; later NC drops that look like subprograms
+// (contain M99, or carry an O-number the main program calls) are loaded as O-files.
+function handleNC(text,name){
+  if(!MAINTEXT){ loadNC(text,name); return; }
+  const nums=Object.keys(splitPrograms(text)).map(Number);
+  const referenced=SEC.some(s=>[...(s.calls||[]),...(s.resolvedCalls||[])].some(c=>{
+    const m=c.match(/(\d+)/); return m && nums.includes(parseInt(m[1],10)); }));
+  if(referenced || /\bM99\b/i.test(text)) registerSub(text,name);   // subprogram O-file
+  else { SUBS={}; loadNC(text,name); }                               // a different main program
 }
 document.getElementById('fnc').onchange=e=>{if(e.target.files[0])routeFile(e.target.files[0]);};
 document.getElementById('fstp').onchange=e=>{if(e.target.files[0])routeFile(e.target.files[0]);};

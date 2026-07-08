@@ -27,7 +27,7 @@ function chatContext(){
   if(!SEC.length) return 'No NC program loaded yet.';
   let out=`PROGRAM FILE: ${PROGNAME}\nPARSED OPERATIONS (✓ = currently shown in 3D):\n`;
   for(const s of SEC){
-    out+=`${visible.has(s.id)?'✓':'·'} ${s.name} | ${s.tool||'?'} | G${s.plane||'?'} | Z ${isFinite(s.zMin)?s.zMin.toFixed(1):'-'}..${isFinite(s.zMax)?s.zMax.toFixed(1):'-'} | cut ${(s.cutLen/1000).toFixed(2)}m${s.calls.length?' | CALLS EXTERNAL SUB (not in file): '+s.calls.join(','):''}\n`;
+    out+=`${visible.has(s.id)?'✓':'·'} ${s.name} | ${s.tool||'?'} | G${s.plane||'?'} | Z ${isFinite(s.zMin)?s.zMin.toFixed(1):'-'}..${isFinite(s.zMax)?s.zMax.toFixed(1):'-'} | cut ${(s.cutLen/1000).toFixed(2)}m${s.resolvedCalls&&s.resolvedCalls.length?' | INLINED SUB: '+s.resolvedCalls.join(','):''}${s.calls.length?' | CALLS EXTERNAL SUB (not in file): '+s.calls.join(','):''}\n`;
   }
   const ro=$('readout').textContent;
   if(ro && ro!=='—') out+=`\nCURRENT ANIMATION POSITION: ${ro}\n`;

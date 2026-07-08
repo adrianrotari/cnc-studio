@@ -1,11 +1,44 @@
 // ---------------- app state ----------------
 const PAL=['#38e07b','#37c8f0','#ffd166','#ef7bf2','#7bf2c0','#f2a17b','#8ab4ff','#e0e07b','#7be0d0','#f27ba1'];
 let SEC=[], visible=new Set();
+let SUBS={}, MAINTEXT='', MAINNAME='';   // loaded subprogram O-files (oNumber -> text)
+
+// A single dropped file can hold several O#### … M99 programs — split into per-program bodies.
+function splitPrograms(text){
+  const out={}; let num=null, buf=[];
+  const flush=()=>{ if(num!=null) out[num]=buf.join('\n'); };
+  for(const ln of text.split(/\r?\n/)){
+    const m=ln.match(/^\s*O\s*(\d+)/i);
+    if(m){ flush(); num=parseInt(m[1],10); buf=[ln]; }
+    else buf.push(ln);
+  }
+  flush();
+  return out;
+}
+// Register a dropped O-file as a subprogram and re-parse the main program so calls inline.
+function registerSub(text,name){
+  const progs=splitPrograms(text);
+  let keys=Object.keys(progs).map(Number);
+  if(!keys.length){                       // no O-line — fall back to the filename's number
+    const m=name.match(/(\d+)/); if(m){ keys=[parseInt(m[1],10)]; progs[keys[0]]=text; }
+  }
+  if(!keys.length){ document.getElementById('fname').textContent='no O-number found in '+name+' — cannot load as subprogram'; return; }
+  for(const k of keys) SUBS[k]=progs[k];
+  if(MAINTEXT) loadNC(MAINTEXT,MAINNAME);
+  else document.getElementById('fname').textContent=keys.map(k=>'O'+k).join(', ')+' held as subprogram — open a main program to inline';
+}
 
 function loadNC(text,name){
-  RAWL=text.split(/\r?\n/); PROGNAME=name;
-  SEC=parseNC(text);
-  document.getElementById('fname').textContent=name+'  ·  '+SEC.length+' operations';
+  RAWL=text.split(/\r?\n/); PROGNAME=name; MAINTEXT=text; MAINNAME=name;
+  SEC=parseNC(text,{subs:SUBS});
+  let unres=0,res=0;
+  for(const s of SEC){ unres+=(s.calls?s.calls.length:0); res+=(s.resolvedCalls?s.resolvedCalls.length:0); }
+  const nsub=Object.keys(SUBS).length;
+  let status=name+'  ·  '+SEC.length+' operations';
+  if(nsub) status+='  ·  '+nsub+' subprogram'+(nsub>1?'s':'')+' loaded';
+  if(res)  status+='  ·  '+res+' call'+(res>1?'s':'')+' inlined';
+  if(unres) status+='  ·  ⚠ '+unres+' unresolved';
+  document.getElementById('fname').textContent=status;
   document.getElementById('drop').style.display='none';
   SEC.forEach((s,i)=>{ s.id=i; s.color = s.isRough12 ? '#38e07b' : PAL[(i%(PAL.length-1))+1]; });
   const rough=SEC.filter(s=>s.isRough12);
@@ -34,7 +67,8 @@ function buildList(){
     if(s.tool){const b=document.createElement('span');b.className='badge tool';b.textContent=s.tool;row.append(b);}
     if(s.isRough12){const b=document.createElement('span');b.className='badge rough';b.textContent='EB12';row.append(b);}
     if(s.plane){const b=document.createElement('span');b.className='badge';b.textContent='G'+s.plane;row.append(b);}
-    for(const c of s.calls.slice(0,1)){const b=document.createElement('span');b.className='badge warn';b.title='calls external subprogram — not in this file';b.textContent='⚠ '+c;row.append(b);}
+    for(const c of (s.resolvedCalls||[]).slice(0,2)){const b=document.createElement('span');b.className='badge sub';b.title='subprogram inlined from a loaded O-file';b.textContent='⤷ '+c;row.append(b);}
+    for(const c of (s.calls||[]).slice(0,1)){const b=document.createElement('span');b.className='badge warn';b.title='calls external subprogram — drop its O-file to inline';b.textContent='⚠ '+c;row.append(b);}
     row.onclick=()=>{visible=new Set([s.id]); buildList(); rebuild3D(); buildTimeline(); fitView(); updateHud();};
     row.ondblclick=()=>{visible=new Set(SEC.map(x=>x.id)); buildList(); rebuild3D(); buildTimeline();};
     box.append(row);

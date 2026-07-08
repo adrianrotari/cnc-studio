@@ -1,0 +1,18 @@
+// Build: concatenate src modules into a single self-contained dist/nc-backplot.html
+// Order matters — modules are plain script fragments sharing top-level scope,
+// exactly mirroring the proven monolith. Do not reorder without testing.
+const fs=require('fs'), path=require('path');
+const SRC=path.join(__dirname,'src'), DIST=path.join(__dirname,'dist');
+const ORDER=['parser.js','scene.js','app.js','anim.js','step.js','chat.js','stock.js','main.js'];
+const shell=fs.readFileSync(path.join(SRC,'shell.html'),'utf8');
+const js=ORDER.map(f=>{
+  let t=fs.readFileSync(path.join(SRC,f),'utf8');
+  // strip the node-only export shim from parser.js
+  t=t.replace(/if\(typeof module[^\n]*\n/,'');
+  return '// ===== '+f+' =====\n'+t;
+}).join('\n');
+if(!shell.includes('/*__APP_JS__*/')) throw new Error('shell.html missing /*__APP_JS__*/ marker');
+const out=shell.replace('/*__APP_JS__*/',()=>js);
+fs.mkdirSync(DIST,{recursive:true});
+fs.writeFileSync(path.join(DIST,'nc-backplot.html'),out);
+console.log('built dist/nc-backplot.html',(out.length/1024).toFixed(1)+' KB');

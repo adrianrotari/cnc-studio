@@ -223,10 +223,14 @@ function updateCut(e){
   if(cat){
     if(cd && fz!=null){
       const slotting = kk!==null ? kk>=0.8 : true;
-      let cf = slotting?cd.fzSlot:cd.fzSide, kind = slotting?'slot':'side';
-      if(cf==null){ cf = slotting?cd.fzSide:cd.fzSlot; kind = slotting?'side':'slot'; }
-      cat.textContent = cf!=null ? ` (cat ${kind} ${cf})` : '';
-      cat.style.color = (cf!=null && fz>cf) ? 'var(--org)' : 'var(--dim)';
+      if(slotting && cd.fzSlot===null){          // vendor explicitly publishes no slotting data
+        cat.textContent=' (cat slot: none published)'; cat.style.color='var(--org)';
+      } else {
+        let cf = slotting?cd.fzSlot:cd.fzSide, kind = slotting?'slot':'side';
+        if(cf==null){ cf = slotting?cd.fzSide:cd.fzSlot; kind = slotting?'side':'slot'; }
+        cat.textContent = cf!=null ? ` (cat ${kind} ${cf})` : '';
+        cat.style.color = (cf!=null && fz>cf) ? 'var(--org)' : 'var(--dim)';
+      }
     } else cat.textContent='';
   }
 }
@@ -266,11 +270,23 @@ function buildToolSelect(){
   const sel=$('tSel'); if(!sel) return;
   const cur=sel.value||'custom';
   sel.innerHTML='';
-  for(const t of allTools()){
-    const o=document.createElement('option'); o.value=t.id; o.textContent=t.name+' · ø'+t.dc+'×'+t.z+'Z'; sel.append(o);
+  for(const t of toolsOfType(allTools(),'endmill')){
+    const o=document.createElement('option'); o.value=t.id;
+    o.textContent=t.name+' · ø'+t.dc+'×'+t.z+'Z'; if(t.note) o.title=t.note; sel.append(o);
   }
   const oc=document.createElement('option'); oc.value='custom'; oc.textContent='custom (manual ø/z)'; sel.append(oc);
   sel.value=[...sel.options].some(o=>o.value===cur)?cur:'custom';
+}
+function buildHolderSelect(){
+  const sel=$('hSel'); if(!sel) return;
+  const cur=sel.value||'none';
+  sel.innerHTML='';
+  const on=document.createElement('option'); on.value='none'; on.textContent='none'; sel.append(on);
+  for(const t of toolsOfType(allTools(),'holder')){
+    const o=document.createElement('option'); o.value=t.id;
+    o.textContent=t.name; if(t.note) o.title=t.note; sel.append(o);
+  }
+  sel.value=[...sel.options].some(o=>o.value===cur)?cur:'none';
 }
 function applyToolSelection(){
   const id=$('tSel').value;
@@ -283,7 +299,22 @@ function applyToolSelection(){
   }
   buildTool(); stockRefresh(); if(TL.length) stepAnim(true);
 }
+function applyHolderSelection(){
+  const id=$('hSel').value;
+  HOLDER.lib = id==='none' ? null : findToolById(allTools(),id);
+  buildTool(); if(TL.length) stepAnim(true);
+}
 $('tSel').onchange=applyToolSelection;
+$('hSel').onchange=applyHolderSelection;
+// stickout — persisted, affects only holder position
+const STICK_LSKEY='cncstudio.stickout';
+(function(){ const s=parseFloat(localStorage.getItem(STICK_LSKEY)); if(isFinite(s)){ HOLDER.stickout=s; $('hStick').value=s; } })();
+$('hStick').onchange=e=>{
+  let v=parseFloat(e.target.value); if(!isFinite(v)) v=76;
+  v=Math.min(200,Math.max(20,v)); e.target.value=v; HOLDER.stickout=v;
+  try{ localStorage.setItem(STICK_LSKEY, String(v)); }catch(_){}
+  buildTool();
+};
 $('tAdd').onclick=()=>{
   const nm=prompt('Save current tool as (name):', TOOL.lib?TOOL.lib.name:('endmill ø'+TOOL.d));
   if(!nm) return;
@@ -294,7 +325,7 @@ $('tAdd').onclick=()=>{
   try{ localStorage.setItem(TOOLS_LSKEY, JSON.stringify(USER_TOOLS)); }catch(_){}
   buildToolSelect(); $('tSel').value=t.id; applyToolSelection();
 };
-buildToolSelect();
+buildToolSelect(); buildHolderSelect();
 // model moved/rotated by hand → stock built from the model must follow
 document.querySelectorAll('#stepbox [data-r]').forEach(b=>b.addEventListener('click',()=>{ if($('sMode').value==='model') stockRefresh(); }));
 ['stX','stY','stZ'].forEach(id=>$(id).addEventListener('change',()=>{ if($('sMode').value==='model') stockRefresh(); }));

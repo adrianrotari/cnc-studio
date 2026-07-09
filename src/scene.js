@@ -57,10 +57,20 @@ document.querySelectorAll('#views .btn').forEach(b=>b.onclick=()=>{
   if(v==='right'){az=0;el=0;}
 });
 
-// tool marker — parametric endmill. Simple cylinder for "custom"; real stepped
-// geometry (flutes → neck → shank → holder) when a library tool is active (TOOL.lib).
+// tool marker — parametric endmill. Simple cylinder for "custom"; stepped geometry
+// for a parametric library tool; measured lathe silhouette when the entry has a
+// profile. HOLDER (optional) is revolved the same way, nose at `stickout` from the tip.
 const TOOL={d:12,z:3,lodF:7,lib:null};
+const HOLDER={lib:null,stickout:76};
 let toolMesh,toolTip;
+// revolve a [[axial,radius],...] profile around the tool-local +Y axis; tip (axial 0)
+// sits at y=yOff, body extends toward +Y (away from the tip).
+function latheFromProfile(profile,yOff,color,op){
+  const pts=profile.map(p=>new THREE.Vector2(Math.max(1e-3,p[1]), p[0]+yOff));
+  const g=new THREE.LatheGeometry(pts,64);
+  return new THREE.Mesh(g,new THREE.MeshPhongMaterial(
+    {color,transparent:op<1,opacity:op,side:THREE.DoubleSide}));
+}
 // helix polylines over the flute length, one per flute
 function fluteHelix(r,len,z,helixDeg){
   const hp=[], nz=Math.max(1,z), tanH=Math.tan((helixDeg||40)*Math.PI/180);
@@ -86,24 +96,28 @@ function buildTool(){
   while(toolGroup.children.length) toolGroup.remove(toolGroup.children[0]);
   toolMesh=new THREE.Group();
   const t=TOOL.lib;
-  if(t && t.lc && t.oal){
+  const holderOn = !!(HOLDER.lib && Array.isArray(HOLDER.lib.profile));
+  if(t && Array.isArray(t.profile)){
+    // measured silhouette → revolved lathe body
+    toolMesh.add(latheFromProfile(t.profile,0,0x37c8f0,0.4));
+    if(t.lc && t.z) toolMesh.add(fluteHelix(t.dc/2,t.lc,t.z,t.helixDeg));
+  } else if(t && t.lc && t.oal){
     const rF=t.dc/2, rN=(t.neckDia||t.dc)/2, rS=(t.shankDia||t.dc)/2;
     const add=m=>{ if(m) toolMesh.add(m); };
     add(tubeSection(rF,0,t.lc,0x37c8f0,0.32));                 // flutes ø dc × lc
     add(tubeSection(rN,t.lc,Math.max(t.lc,t.reach),0x8aa0b8,0.55)); // neck ø neckDia → reach
     add(tubeSection(rS,t.reach,Math.max(t.reach,t.oal),0x6c7f96,0.9)); // shank ø shankDia → oal
     add(fluteHelix(rF,t.lc,t.z,t.helixDeg));
-    const hold=new THREE.Mesh(new THREE.CylinderGeometry(rS+5,rS+7,t.dc*1.8,20),
-        new THREE.MeshPhongMaterial({color:0x5a6b80}));
-    hold.position.y=t.oal+t.dc*0.9; toolMesh.add(hold);
+    if(!holderOn){ const hold=new THREE.Mesh(new THREE.CylinderGeometry(rS+5,rS+7,t.dc*1.8,20),
+        new THREE.MeshPhongMaterial({color:0x5a6b80})); hold.position.y=t.oal+t.dc*0.9; toolMesh.add(hold); }
   } else {
     const d=TOOL.d, r=d/2, fl=TOOL.lodF*d;
     toolMesh.add(tubeSection(r,0,fl,0x37c8f0,0.30));
     toolMesh.add(fluteHelix(r,fl,TOOL.z,40));
-    const hold=new THREE.Mesh(new THREE.CylinderGeometry(r+5,r+7,d*1.8,20),
-        new THREE.MeshPhongMaterial({color:0x6c7f96}));
-    hold.position.y=fl+d*0.9; toolMesh.add(hold);
+    if(!holderOn){ const hold=new THREE.Mesh(new THREE.CylinderGeometry(r+5,r+7,d*1.8,20),
+        new THREE.MeshPhongMaterial({color:0x6c7f96})); hold.position.y=fl+d*0.9; toolMesh.add(hold); }
   }
+  if(holderOn) toolMesh.add(latheFromProfile(HOLDER.lib.profile,HOLDER.stickout,0x6c7f96,0.92));
   toolTip=new THREE.Mesh(new THREE.SphereGeometry(Math.max(0.8,TOOL.d/10),12,10),
       new THREE.MeshBasicMaterial({color:0x37c8f0}));
   toolGroup.add(toolMesh); toolGroup.add(toolTip); toolGroup.visible=false;

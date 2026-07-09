@@ -57,8 +57,14 @@ function stockInit(){
   STK.grid=null; STK.stamped=0; STK.ae=null; STK.ap=null;
   const bb=stockBounds();
   if(!bb){ STK.on=false; $('ckStock').checked=false; return; }
-  const useModel = $('sMode').value==='model' && stepGroup.children.length>0;
+  const mode=$('sMode').value;
+  const useModel = mode==='model' && stepGroup.children.length>0;
+  const useCyl = mode==='cyl';
   const off = Math.max(0,parseFloat($('sOff').value)||0);
+  const boxTop = isFinite(parseFloat($('sTop').value))?parseFloat($('sTop').value):0.5;
+  const cAxis = $('sAxis').value==='Z'?'Z':'X';
+  const cR = Math.max(0.5,(parseFloat($('sDia').value)||90)/2);
+  const cBnd = useCyl?billetBounds(cAxis,cR,boxTop):null;
   const m=TOOL.d*0.75, cell=STK.cell;
   let x0=bb.mn[0]-m, y0=bb.mn[1]-m, x1=bb.mx[0]+m, y1=bb.mx[1]+m, mb=null;
   if(useModel){
@@ -67,10 +73,14 @@ function stockInit(){
     x0=Math.min(x0,mb.min.x-off-2); y0=Math.min(y0,mb.min.y-off-2);
     x1=Math.max(x1,mb.max.x+off+2); y1=Math.max(y1,mb.max.y+off+2);
   }
+  if(useCyl){                                   // union grid with the billet footprint
+    if(cBnd.x){ x0=Math.min(x0,cBnd.x[0]); x1=Math.max(x1,cBnd.x[1]); }
+    if(cBnd.y){ y0=Math.min(y0,cBnd.y[0]); y1=Math.max(y1,cBnd.y[1]); }
+  }
   STK.x0=x0; STK.y0=y0;
   STK.nx=Math.min(1200,Math.ceil((x1-x0)/cell)+1);
   STK.ny=Math.min(1200,Math.ceil((y1-y0)/cell)+1);
-  STK.zbot=Math.min(bb.mn[2],mb?mb.min.z:1e9)-2;
+  STK.zbot=Math.min(bb.mn[2],mb?mb.min.z:1e9,cBnd?cBnd.minTop:1e9)-2;
   const NC=STK.nx*STK.ny;
   STK.grid=new Float32Array(NC);
   if(useModel){
@@ -93,11 +103,19 @@ function stockInit(){
       }
       STK.ztop=isFinite(zmax)?zmax:0.5;
     } else {
-      STK.ztop=parseFloat($('sTop').value); if(!isFinite(STK.ztop)) STK.ztop=0.5;
+      STK.ztop=boxTop;
       STK.grid.fill(STK.ztop);
     }
+  } else if(useCyl){
+    let zmax=-Infinity;
+    for(let j=0;j<STK.ny;j++)for(let i=0;i<STK.nx;i++){
+      const px=STK.x0+i*cell, py=STK.y0+j*cell;
+      const v=billetHeight(cAxis,cR,px,py,boxTop,STK.zbot);
+      STK.grid[j*STK.nx+i]=v; if(v>zmax)zmax=v;
+    }
+    STK.ztop=isFinite(zmax)?zmax:0.5;
   } else {
-    STK.ztop=parseFloat($('sTop').value); if(!isFinite(STK.ztop)) STK.ztop=0.5;
+    STK.ztop=boxTop;
     STK.grid.fill(STK.ztop);
   }
   const rC=Math.ceil((TOOL.d/2)/cell), offs=[];
@@ -223,6 +241,8 @@ $('bStkReset').onclick=stockRefresh;
 $('sTop').onchange=stockRefresh;
 $('sMode').onchange=stockRefresh;
 $('sOff').onchange=stockRefresh;
+$('sDia').onchange=stockRefresh;
+$('sAxis').onchange=stockRefresh;
 $('tD').onchange=e=>{ TOOL.d=Math.max(0.5,parseFloat(e.target.value)||12); buildTool(); stockRefresh(); };
 $('tZ').onchange=e=>{ TOOL.z=Math.max(1,parseInt(e.target.value)||3); };
 // model moved/rotated by hand → stock built from the model must follow

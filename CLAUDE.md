@@ -11,13 +11,14 @@ Browser-based CNC program analyzer. Single-file deliverable built from plain-scr
 ## Architecture — read before editing
 
 `src/*.js` are NOT ES modules. They are plain script fragments sharing one top-level
-scope, concatenated by `build.js` in a fixed order (parser → scene → app → anim →
+scope, concatenated by `build.js` in a fixed order (parser → geom → scene → app → anim →
 step → chat → stock → main). Cross-module references are bare globals. Do not
 reorder, do not add import/export, do not introduce duplicate top-level names.
 ES-module migration is allowed only as a dedicated refactor with browser testing.
 
-`src/parser.js` is pure (no DOM) and node-testable — keep it that way.
+`src/parser.js` and `src/geom.js` are pure (no DOM) and node-testable — keep them that way.
 The `/*__PARSER_START__*/ ... /*__PARSER_END__*/` markers are used by tooling; keep them.
+Tests: `node tests/parser.test.js` and `node tests/geom.test.js` (both must stay green).
 
 ## Rules
 
@@ -42,3 +43,7 @@ M92Fn is a feed-guard macro (F word there is NOT modal feed), G04 X = dwell seco
    plot), cutter-comp offset paths (left/right by tool radius), cutting-data audit
    per op (fz/vc/hex vs material library), printable setup report.
 2. v0.3 CAM-lite: DXF import → contour/pocket/drill 2.5D paths, ISO post.
+
+Backlog / nice-to-have:
+- Cylinder billet: optional centerline offsets (X/Y for axis Z, Y/Z for axis X) for
+  off-center setups. Currently the centerline is fixed through the program origin.

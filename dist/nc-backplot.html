@@ -108,8 +108,8 @@
     <canvas id="cv"></canvas>
     <div id="hud"></div>
     <div id="cut">
-      <div><span class="lbl">TOOL</span> ø<input id="tD" value="12" step="0.1" type="number"> × <input id="tZ" value="3" step="1" type="number">Z · 7×D flute · <span class="lbl">STOCK</span> <select id="sMode" style="background:#0a0e14;border:1px solid var(--line);color:var(--tx);border-radius:4px;font-size:10.5px"><option value="model">model + offset</option><option value="box">flat box</option><option value="cyl">cylinder billet</option></select> +<input id="sOff" value="3" step="0.5" type="number">mm · box top <input id="sTop" value="0.5" step="0.1" type="number"> · bar ø<input id="sDia" value="90" step="1" type="number"> axis <select id="sAxis" style="background:#0a0e14;border:1px solid var(--line);color:var(--tx);border-radius:4px;font-size:10.5px"><option value="X">X</option><option value="Z">Z</option></select> <button class="btn" id="bStkReset" style="padding:1px 7px;font-size:10px">reset</button></div>
-      <div><b id="cN">—</b> rpm · vc <b id="cVc">—</b> m/min · F <b id="cF">—</b> mm/min · fz <b id="cFz">—</b> mm</div>
+      <div><span class="lbl">TOOL</span> <select id="tSel" style="background:#0a0e14;border:1px solid var(--line);color:var(--tx);border-radius:4px;font-size:10.5px;max-width:190px"></select> ø<input id="tD" value="12" step="0.1" type="number"> × <input id="tZ" value="3" step="1" type="number">Z <button class="btn" id="tAdd" title="save current ø/z as a named tool (localStorage)" style="padding:1px 6px;font-size:10px">+</button> · <span class="lbl">STOCK</span> <select id="sMode" style="background:#0a0e14;border:1px solid var(--line);color:var(--tx);border-radius:4px;font-size:10.5px"><option value="model">model + offset</option><option value="box">flat box</option><option value="cyl">cylinder billet</option></select> +<input id="sOff" value="3" step="0.5" type="number">mm · box top <input id="sTop" value="0.5" step="0.1" type="number"> · bar ø<input id="sDia" value="90" step="1" type="number"> axis <select id="sAxis" style="background:#0a0e14;border:1px solid var(--line);color:var(--tx);border-radius:4px;font-size:10.5px"><option value="X">X</option><option value="Z">Z</option></select> <button class="btn" id="bStkReset" style="padding:1px 7px;font-size:10px">reset</button></div>
+      <div><b id="cN">—</b> rpm · vc <b id="cVc">—</b> m/min · F <b id="cF">—</b> mm/min · fz <b id="cFz">—</b> mm<span id="cFzCat" style="color:var(--dim)"></span></div>
       <div>ae <b class="hl" id="cAe">—</b> mm (<b id="cAeD">—</b>% D) · hex <b class="hl" id="cHex">—</b> mm · ap <b id="cAp">—</b> mm · MRR <b id="cMrr">—</b> cm³/min</div>
     </div>
     <div id="views">
@@ -432,6 +432,68 @@ function billetBounds(axis, r, ztop){
   return {x:[-r, r], y:[-r, r], minTop:ztop};
 }
 
+// ===== tools.js =====
+// ---------- pure tool library (no DOM, node-testable) ----------
+// Schema per tool (all lengths mm, angles deg):
+//   id, name, vendor, orderNo, gtin, dc (cutting ø), z (flutes), lc (flute length),
+//   reach, neckDia, shankDia, oal, cornerR, helixDeg, variablePitch, coating,
+//   substrate, throughCoolant, maxRampDeg, maxSlotDepthFactor (× dc),
+//   cut: { <material>: { vc (m/min), fzSlot, fzSide (mm/tooth), aeSide (× dc) } }
+const SEED_TOOLS = [
+  {
+    id:'garant-202019-12',
+    name:'GARANT Master Alu PickPocket ø12',
+    vendor:'GARANT (Hoffmann)',
+    orderNo:'202019 12',
+    gtin:'4062406381110',
+    dc:12, z:3, lc:19, reach:73, neckDia:11, shankDia:12, oal:120,
+    cornerR:0.2, helixDeg:42, variablePitch:true,
+    coating:'DLC sp2', substrate:'VHM', throughCoolant:true,
+    maxRampDeg:45, maxSlotDepthFactor:2,
+    cut:{
+      'alu':                {vc:380},
+      'alu-short-chipping': {vc:300, fzSlot:0.06, fzSide:0.08, aeSide:0.3},
+      'alu-10Si':           {vc:270},   // aluminium up to ~10% Si
+      'Cu':                 {vc:140},
+      'CuZn':               {vc:160}
+    }
+  }
+];
+
+// Numeric fields every complete catalogue tool must carry.
+const TOOL_NUM_FIELDS = ['dc','z','lc','reach','neckDia','shankDia','oal','cornerR',
+                         'helixDeg','maxRampDeg','maxSlotDepthFactor'];
+
+function findToolById(list, id){ return (list||[]).find(t=>t&&t.id===id) || null; }
+
+// The cutting-data material that carries fz values (for catalog-vs-live fz display).
+function toolCutData(tool){
+  if(!tool || !tool.cut) return null;
+  for(const mat in tool.cut){
+    const c=tool.cut[mat];
+    if(c && (c.fzSlot!=null || c.fzSide!=null)) return Object.assign({material:mat}, c);
+  }
+  return null;
+}
+
+// Returns a list of schema problems ([] = valid). Used by tests and before persisting.
+function validateTool(t){
+  const p=[];
+  if(!t || typeof t!=='object'){ return ['not an object']; }
+  for(const f of ['id','name','vendor','orderNo','coating','substrate'])
+    if(typeof t[f]!=='string' || !t[f]) p.push('missing/blank '+f);
+  for(const f of TOOL_NUM_FIELDS)
+    if(typeof t[f]!=='number' || !isFinite(t[f])) p.push('missing/non-numeric '+f);
+  for(const f of ['variablePitch','throughCoolant'])
+    if(typeof t[f]!=='boolean') p.push('missing boolean '+f);
+  if(!t.cut || typeof t.cut!=='object' || !Object.keys(t.cut).length) p.push('missing cut materials');
+  else for(const mat in t.cut){
+    if(typeof t.cut[mat].vc!=='number') p.push('material '+mat+' missing vc');
+  }
+  return p;
+}
+
+
 // ===== scene.js =====
 // ---------------- 3D scene ----------------
 let scene,camera,renderer,pathGroup,stepGroup,toolGroup,stockGroup,GRID;
@@ -492,33 +554,54 @@ document.querySelectorAll('#views .btn').forEach(b=>b.onclick=()=>{
   if(v==='right'){az=0;el=0;}
 });
 
-// tool marker — parametric endmill (ø D × z flutes, 7×D flute length + holder)
-const TOOL={d:12,z:3,lodF:7};
+// tool marker — parametric endmill. Simple cylinder for "custom"; real stepped
+// geometry (flutes → neck → shank → holder) when a library tool is active (TOOL.lib).
+const TOOL={d:12,z:3,lodF:7,lib:null};
 let toolMesh,toolTip;
-function buildTool(){
-  while(toolGroup.children.length) toolGroup.remove(toolGroup.children[0]);
-  const d=TOOL.d, r=d/2, fl=TOOL.lodF*d;
-  toolMesh=new THREE.Group();
-  const flute=new THREE.Mesh(new THREE.CylinderGeometry(r,r,fl,28),
-      new THREE.MeshPhongMaterial({color:0x37c8f0,transparent:true,opacity:0.30}));
-  flute.position.y=fl/2; toolMesh.add(flute);
-  const hp=[];
-  for(let f=0;f<Math.max(1,TOOL.z);f++){
-    const ph0=f*2*Math.PI/Math.max(1,TOOL.z); let prev=null;
+// helix polylines over the flute length, one per flute
+function fluteHelix(r,len,z,helixDeg){
+  const hp=[], nz=Math.max(1,z), tanH=Math.tan((helixDeg||40)*Math.PI/180);
+  for(let f=0;f<nz;f++){
+    const ph0=f*2*Math.PI/nz; let prev=null;
     for(let i=0;i<=48;i++){
-      const y=fl*i/48, ph=ph0+y*Math.tan(40*Math.PI/180)/r;
+      const y=len*i/48, ph=ph0+y*tanH/r;
       const p=[r*Math.cos(ph),y,r*Math.sin(ph)];
-      if(prev) hp.push(...prev,...p);
-      prev=p;
+      if(prev) hp.push(...prev,...p); prev=p;
     }
   }
   const hg=new THREE.BufferGeometry();
   hg.setAttribute('position',new THREE.Float32BufferAttribute(hp,3));
-  toolMesh.add(new THREE.LineSegments(hg,new THREE.LineBasicMaterial({color:0x9feaff,transparent:true,opacity:0.55})));
-  const hold=new THREE.Mesh(new THREE.CylinderGeometry(r+5,r+7,d*1.8,20),
-      new THREE.MeshPhongMaterial({color:0x6c7f96}));
-  hold.position.y=fl+d*0.9; toolMesh.add(hold);
-  toolTip=new THREE.Mesh(new THREE.SphereGeometry(Math.max(0.8,r/5),12,10),
+  return new THREE.LineSegments(hg,new THREE.LineBasicMaterial({color:0x9feaff,transparent:true,opacity:0.6}));
+}
+function tubeSection(r,y0,y1,color,op){
+  const h=y1-y0; if(h<=1e-6) return null;
+  const m=new THREE.Mesh(new THREE.CylinderGeometry(r,r,h,28),
+      new THREE.MeshPhongMaterial({color,transparent:op<1,opacity:op}));
+  m.position.y=(y0+y1)/2; return m;
+}
+function buildTool(){
+  while(toolGroup.children.length) toolGroup.remove(toolGroup.children[0]);
+  toolMesh=new THREE.Group();
+  const t=TOOL.lib;
+  if(t && t.lc && t.oal){
+    const rF=t.dc/2, rN=(t.neckDia||t.dc)/2, rS=(t.shankDia||t.dc)/2;
+    const add=m=>{ if(m) toolMesh.add(m); };
+    add(tubeSection(rF,0,t.lc,0x37c8f0,0.32));                 // flutes ø dc × lc
+    add(tubeSection(rN,t.lc,Math.max(t.lc,t.reach),0x8aa0b8,0.55)); // neck ø neckDia → reach
+    add(tubeSection(rS,t.reach,Math.max(t.reach,t.oal),0x6c7f96,0.9)); // shank ø shankDia → oal
+    add(fluteHelix(rF,t.lc,t.z,t.helixDeg));
+    const hold=new THREE.Mesh(new THREE.CylinderGeometry(rS+5,rS+7,t.dc*1.8,20),
+        new THREE.MeshPhongMaterial({color:0x5a6b80}));
+    hold.position.y=t.oal+t.dc*0.9; toolMesh.add(hold);
+  } else {
+    const d=TOOL.d, r=d/2, fl=TOOL.lodF*d;
+    toolMesh.add(tubeSection(r,0,fl,0x37c8f0,0.30));
+    toolMesh.add(fluteHelix(r,fl,TOOL.z,40));
+    const hold=new THREE.Mesh(new THREE.CylinderGeometry(r+5,r+7,d*1.8,20),
+        new THREE.MeshPhongMaterial({color:0x6c7f96}));
+    hold.position.y=fl+d*0.9; toolMesh.add(hold);
+  }
+  toolTip=new THREE.Mesh(new THREE.SphereGeometry(Math.max(0.8,TOOL.d/10),12,10),
       new THREE.MeshBasicMaterial({color:0x37c8f0}));
   toolGroup.add(toolMesh); toolGroup.add(toolTip); toolGroup.visible=false;
 }
@@ -1142,6 +1225,17 @@ function updateCut(e){
   $('cHex').textContent=hex!==null?hex.toFixed(3):'—';
   $('cAp').textContent=ap!==null?ap.toFixed(2):'—';
   $('cMrr').textContent=(ae&&ap&&f)?(ae*ap*f/1000).toFixed(1):'—';
+  // catalog fz vs live (library tools) — slotting vs side by measured engagement
+  const cat=$('cFzCat'), cd=TOOL.lib?toolCutData(TOOL.lib):null;
+  if(cat){
+    if(cd && fz!=null){
+      const slotting = kk!==null ? kk>=0.8 : true;
+      let cf = slotting?cd.fzSlot:cd.fzSide, kind = slotting?'slot':'side';
+      if(cf==null){ cf = slotting?cd.fzSide:cd.fzSlot; kind = slotting?'side':'slot'; }
+      cat.textContent = cf!=null ? ` (cat ${kind} ${cf})` : '';
+      cat.style.color = (cf!=null && fz>cf) ? 'var(--org)' : 'var(--dim)';
+    } else cat.textContent='';
+  }
 }
 function autoAlign(){
   if(!stepGroup.children.length||!SEC.length) return;
@@ -1169,6 +1263,45 @@ $('sDia').onchange=stockRefresh;
 $('sAxis').onchange=stockRefresh;
 $('tD').onchange=e=>{ TOOL.d=Math.max(0.5,parseFloat(e.target.value)||12); buildTool(); stockRefresh(); };
 $('tZ').onchange=e=>{ TOOL.z=Math.max(1,parseInt(e.target.value)||3); };
+
+// ---- tool library: seed tools + user tools (localStorage) + custom ----
+const TOOLS_LSKEY='cncstudio.userTools';
+let USER_TOOLS=[];
+try{ const s=localStorage.getItem(TOOLS_LSKEY); if(s) USER_TOOLS=JSON.parse(s)||[]; }catch(_){ USER_TOOLS=[]; }
+function allTools(){ return SEED_TOOLS.concat(USER_TOOLS); }
+function buildToolSelect(){
+  const sel=$('tSel'); if(!sel) return;
+  const cur=sel.value||'custom';
+  sel.innerHTML='';
+  for(const t of allTools()){
+    const o=document.createElement('option'); o.value=t.id; o.textContent=t.name+' · ø'+t.dc+'×'+t.z+'Z'; sel.append(o);
+  }
+  const oc=document.createElement('option'); oc.value='custom'; oc.textContent='custom (manual ø/z)'; sel.append(oc);
+  sel.value=[...sel.options].some(o=>o.value===cur)?cur:'custom';
+}
+function applyToolSelection(){
+  const id=$('tSel').value;
+  if(id==='custom'){
+    TOOL.lib=null; $('tD').disabled=false; $('tZ').disabled=false;
+  } else {
+    const t=findToolById(allTools(),id);
+    if(t){ TOOL.lib=t; TOOL.d=t.dc; TOOL.z=t.z; $('tD').value=t.dc; $('tZ').value=t.z;
+           $('tD').disabled=true; $('tZ').disabled=true; }
+  }
+  buildTool(); stockRefresh(); if(TL.length) stepAnim(true);
+}
+$('tSel').onchange=applyToolSelection;
+$('tAdd').onclick=()=>{
+  const nm=prompt('Save current tool as (name):', TOOL.lib?TOOL.lib.name:('endmill ø'+TOOL.d));
+  if(!nm) return;
+  const base=TOOL.lib||{};
+  const t=Object.assign({}, base, {id:'user-'+Date.now(), name:nm, vendor:base.vendor||'user',
+      orderNo:base.orderNo||'', dc:TOOL.d, z:TOOL.z});
+  USER_TOOLS.push(t);
+  try{ localStorage.setItem(TOOLS_LSKEY, JSON.stringify(USER_TOOLS)); }catch(_){}
+  buildToolSelect(); $('tSel').value=t.id; applyToolSelection();
+};
+buildToolSelect();
 // model moved/rotated by hand → stock built from the model must follow
 document.querySelectorAll('#stepbox [data-r]').forEach(b=>b.addEventListener('click',()=>{ if($('sMode').value==='model') stockRefresh(); }));
 ['stX','stY','stZ'].forEach(id=>$(id).addEventListener('change',()=>{ if($('sMode').value==='model') stockRefresh(); }));

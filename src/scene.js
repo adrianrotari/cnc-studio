@@ -57,33 +57,54 @@ document.querySelectorAll('#views .btn').forEach(b=>b.onclick=()=>{
   if(v==='right'){az=0;el=0;}
 });
 
-// tool marker — parametric endmill (ø D × z flutes, 7×D flute length + holder)
-const TOOL={d:12,z:3,lodF:7};
+// tool marker — parametric endmill. Simple cylinder for "custom"; real stepped
+// geometry (flutes → neck → shank → holder) when a library tool is active (TOOL.lib).
+const TOOL={d:12,z:3,lodF:7,lib:null};
 let toolMesh,toolTip;
-function buildTool(){
-  while(toolGroup.children.length) toolGroup.remove(toolGroup.children[0]);
-  const d=TOOL.d, r=d/2, fl=TOOL.lodF*d;
-  toolMesh=new THREE.Group();
-  const flute=new THREE.Mesh(new THREE.CylinderGeometry(r,r,fl,28),
-      new THREE.MeshPhongMaterial({color:0x37c8f0,transparent:true,opacity:0.30}));
-  flute.position.y=fl/2; toolMesh.add(flute);
-  const hp=[];
-  for(let f=0;f<Math.max(1,TOOL.z);f++){
-    const ph0=f*2*Math.PI/Math.max(1,TOOL.z); let prev=null;
+// helix polylines over the flute length, one per flute
+function fluteHelix(r,len,z,helixDeg){
+  const hp=[], nz=Math.max(1,z), tanH=Math.tan((helixDeg||40)*Math.PI/180);
+  for(let f=0;f<nz;f++){
+    const ph0=f*2*Math.PI/nz; let prev=null;
     for(let i=0;i<=48;i++){
-      const y=fl*i/48, ph=ph0+y*Math.tan(40*Math.PI/180)/r;
+      const y=len*i/48, ph=ph0+y*tanH/r;
       const p=[r*Math.cos(ph),y,r*Math.sin(ph)];
-      if(prev) hp.push(...prev,...p);
-      prev=p;
+      if(prev) hp.push(...prev,...p); prev=p;
     }
   }
   const hg=new THREE.BufferGeometry();
   hg.setAttribute('position',new THREE.Float32BufferAttribute(hp,3));
-  toolMesh.add(new THREE.LineSegments(hg,new THREE.LineBasicMaterial({color:0x9feaff,transparent:true,opacity:0.55})));
-  const hold=new THREE.Mesh(new THREE.CylinderGeometry(r+5,r+7,d*1.8,20),
-      new THREE.MeshPhongMaterial({color:0x6c7f96}));
-  hold.position.y=fl+d*0.9; toolMesh.add(hold);
-  toolTip=new THREE.Mesh(new THREE.SphereGeometry(Math.max(0.8,r/5),12,10),
+  return new THREE.LineSegments(hg,new THREE.LineBasicMaterial({color:0x9feaff,transparent:true,opacity:0.6}));
+}
+function tubeSection(r,y0,y1,color,op){
+  const h=y1-y0; if(h<=1e-6) return null;
+  const m=new THREE.Mesh(new THREE.CylinderGeometry(r,r,h,28),
+      new THREE.MeshPhongMaterial({color,transparent:op<1,opacity:op}));
+  m.position.y=(y0+y1)/2; return m;
+}
+function buildTool(){
+  while(toolGroup.children.length) toolGroup.remove(toolGroup.children[0]);
+  toolMesh=new THREE.Group();
+  const t=TOOL.lib;
+  if(t && t.lc && t.oal){
+    const rF=t.dc/2, rN=(t.neckDia||t.dc)/2, rS=(t.shankDia||t.dc)/2;
+    const add=m=>{ if(m) toolMesh.add(m); };
+    add(tubeSection(rF,0,t.lc,0x37c8f0,0.32));                 // flutes ø dc × lc
+    add(tubeSection(rN,t.lc,Math.max(t.lc,t.reach),0x8aa0b8,0.55)); // neck ø neckDia → reach
+    add(tubeSection(rS,t.reach,Math.max(t.reach,t.oal),0x6c7f96,0.9)); // shank ø shankDia → oal
+    add(fluteHelix(rF,t.lc,t.z,t.helixDeg));
+    const hold=new THREE.Mesh(new THREE.CylinderGeometry(rS+5,rS+7,t.dc*1.8,20),
+        new THREE.MeshPhongMaterial({color:0x5a6b80}));
+    hold.position.y=t.oal+t.dc*0.9; toolMesh.add(hold);
+  } else {
+    const d=TOOL.d, r=d/2, fl=TOOL.lodF*d;
+    toolMesh.add(tubeSection(r,0,fl,0x37c8f0,0.30));
+    toolMesh.add(fluteHelix(r,fl,TOOL.z,40));
+    const hold=new THREE.Mesh(new THREE.CylinderGeometry(r+5,r+7,d*1.8,20),
+        new THREE.MeshPhongMaterial({color:0x6c7f96}));
+    hold.position.y=fl+d*0.9; toolMesh.add(hold);
+  }
+  toolTip=new THREE.Mesh(new THREE.SphereGeometry(Math.max(0.8,TOOL.d/10),12,10),
       new THREE.MeshBasicMaterial({color:0x37c8f0}));
   toolGroup.add(toolMesh); toolGroup.add(toolTip); toolGroup.visible=false;
 }

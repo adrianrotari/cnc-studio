@@ -218,6 +218,17 @@ function updateCut(e){
   $('cHex').textContent=hex!==null?hex.toFixed(3):'—';
   $('cAp').textContent=ap!==null?ap.toFixed(2):'—';
   $('cMrr').textContent=(ae&&ap&&f)?(ae*ap*f/1000).toFixed(1):'—';
+  // catalog fz vs live (library tools) — slotting vs side by measured engagement
+  const cat=$('cFzCat'), cd=TOOL.lib?toolCutData(TOOL.lib):null;
+  if(cat){
+    if(cd && fz!=null){
+      const slotting = kk!==null ? kk>=0.8 : true;
+      let cf = slotting?cd.fzSlot:cd.fzSide, kind = slotting?'slot':'side';
+      if(cf==null){ cf = slotting?cd.fzSide:cd.fzSlot; kind = slotting?'side':'slot'; }
+      cat.textContent = cf!=null ? ` (cat ${kind} ${cf})` : '';
+      cat.style.color = (cf!=null && fz>cf) ? 'var(--org)' : 'var(--dim)';
+    } else cat.textContent='';
+  }
 }
 function autoAlign(){
   if(!stepGroup.children.length||!SEC.length) return;
@@ -245,6 +256,45 @@ $('sDia').onchange=stockRefresh;
 $('sAxis').onchange=stockRefresh;
 $('tD').onchange=e=>{ TOOL.d=Math.max(0.5,parseFloat(e.target.value)||12); buildTool(); stockRefresh(); };
 $('tZ').onchange=e=>{ TOOL.z=Math.max(1,parseInt(e.target.value)||3); };
+
+// ---- tool library: seed tools + user tools (localStorage) + custom ----
+const TOOLS_LSKEY='cncstudio.userTools';
+let USER_TOOLS=[];
+try{ const s=localStorage.getItem(TOOLS_LSKEY); if(s) USER_TOOLS=JSON.parse(s)||[]; }catch(_){ USER_TOOLS=[]; }
+function allTools(){ return SEED_TOOLS.concat(USER_TOOLS); }
+function buildToolSelect(){
+  const sel=$('tSel'); if(!sel) return;
+  const cur=sel.value||'custom';
+  sel.innerHTML='';
+  for(const t of allTools()){
+    const o=document.createElement('option'); o.value=t.id; o.textContent=t.name+' · ø'+t.dc+'×'+t.z+'Z'; sel.append(o);
+  }
+  const oc=document.createElement('option'); oc.value='custom'; oc.textContent='custom (manual ø/z)'; sel.append(oc);
+  sel.value=[...sel.options].some(o=>o.value===cur)?cur:'custom';
+}
+function applyToolSelection(){
+  const id=$('tSel').value;
+  if(id==='custom'){
+    TOOL.lib=null; $('tD').disabled=false; $('tZ').disabled=false;
+  } else {
+    const t=findToolById(allTools(),id);
+    if(t){ TOOL.lib=t; TOOL.d=t.dc; TOOL.z=t.z; $('tD').value=t.dc; $('tZ').value=t.z;
+           $('tD').disabled=true; $('tZ').disabled=true; }
+  }
+  buildTool(); stockRefresh(); if(TL.length) stepAnim(true);
+}
+$('tSel').onchange=applyToolSelection;
+$('tAdd').onclick=()=>{
+  const nm=prompt('Save current tool as (name):', TOOL.lib?TOOL.lib.name:('endmill ø'+TOOL.d));
+  if(!nm) return;
+  const base=TOOL.lib||{};
+  const t=Object.assign({}, base, {id:'user-'+Date.now(), name:nm, vendor:base.vendor||'user',
+      orderNo:base.orderNo||'', dc:TOOL.d, z:TOOL.z});
+  USER_TOOLS.push(t);
+  try{ localStorage.setItem(TOOLS_LSKEY, JSON.stringify(USER_TOOLS)); }catch(_){}
+  buildToolSelect(); $('tSel').value=t.id; applyToolSelection();
+};
+buildToolSelect();
 // model moved/rotated by hand → stock built from the model must follow
 document.querySelectorAll('#stepbox [data-r]').forEach(b=>b.addEventListener('click',()=>{ if($('sMode').value==='model') stockRefresh(); }));
 ['stX','stY','stZ'].forEach(id=>$(id).addEventListener('change',()=>{ if($('sMode').value==='model') stockRefresh(); }));

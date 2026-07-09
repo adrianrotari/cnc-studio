@@ -11,14 +11,15 @@ Browser-based CNC program analyzer. Single-file deliverable built from plain-scr
 ## Architecture — read before editing
 
 `src/*.js` are NOT ES modules. They are plain script fragments sharing one top-level
-scope, concatenated by `build.js` in a fixed order (parser → geom → scene → app → anim →
-step → chat → stock → main). Cross-module references are bare globals. Do not
+scope, concatenated by `build.js` in a fixed order (parser → geom → tools → scene → app →
+anim → step → chat → stock → main). Cross-module references are bare globals. Do not
 reorder, do not add import/export, do not introduce duplicate top-level names.
 ES-module migration is allowed only as a dedicated refactor with browser testing.
 
-`src/parser.js` and `src/geom.js` are pure (no DOM) and node-testable — keep them that way.
+`src/parser.js`, `src/geom.js` and `src/tools.js` are pure (no DOM) and node-testable —
+keep them that way.
 The `/*__PARSER_START__*/ ... /*__PARSER_END__*/` markers are used by tooling; keep them.
-Tests: `node tests/parser.test.js` and `node tests/geom.test.js` (both must stay green).
+Tests: `node tests/{parser,geom,tools}.test.js` (all must stay green).
 
 ## Rules
 

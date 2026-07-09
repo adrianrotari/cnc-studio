@@ -483,6 +483,19 @@ const SEED_TOOLS = [
     profile:[[0,5.8],[0.2,6],[19,6],[72.74,5.85],[73.56,6],[118.8,6],[120,4.8]]
   },
   {
+    id:'inova-247121-10',
+    type:'endmill',
+    name:'Inova 247 HPC ø12 (247.121.10)',
+    vendor:'Inova Tools',
+    orderNo:'247.121.10',
+    dc:12, z:3, lc:26, reach:73, neckDia:11.7, shankDia:12, oal:120,
+    cornerR:0.2, cornerType:'chamfer 0.2x45', throughCoolant:true, coolantStyle:'IC',
+    note:'247 series solid-carbide HPC with internal coolant, long version L1 120 / L3 73; .10 = shank variant (confirm HA/HB); helix + coating not captured yet',
+    // dims verified against the inovatools.eu 247 series table; silhouette measured
+    // from the vendor STEP's circle entities
+    profile:[[0,5.8],[0.2,6],[26,6],[26.56,5.85],[72.74,5.85],[73.56,6],[118.8,6],[120,4.8]]
+  },
+  {
     id:'sandvik-930-c5-s-20-085',
     type:'holder',
     name:'Sandvik CoroChuck 930 C5 slender ø20 GL85',
@@ -543,11 +556,13 @@ function validateTool(t){
       if(typeof t[f]!=='number' || !isFinite(t[f])) p.push('missing/non-numeric '+f);
     for(const f of ['lc','reach','neckDia','shankDia','oal','cornerR','helixDeg','maxRampDeg','maxSlotDepthFactor'])
       if(t[f]!=null && (typeof t[f]!=='number' || !isFinite(t[f]))) p.push(f+' must be numeric');
-    if(!t.cut || typeof t.cut!=='object' || !Object.keys(t.cut).length) p.push('missing cut materials');
-    else for(const mat in t.cut){
-      const c=t.cut[mat];
-      if(typeof c.vc!=='number') p.push('material '+mat+' missing vc');
-      if('fzSlot' in c && c.fzSlot!==null && typeof c.fzSlot!=='number') p.push('material '+mat+' bad fzSlot');
+    if(t.cut!=null){                    // cut data is optional (may be uncaptured)
+      if(typeof t.cut!=='object') p.push('cut must be an object');
+      else for(const mat in t.cut){
+        const c=t.cut[mat];
+        if(typeof c.vc!=='number') p.push('material '+mat+' missing vc');
+        if('fzSlot' in c && c.fzSlot!==null && typeof c.fzSlot!=='number') p.push('material '+mat+' bad fzSlot');
+      }
     }
   } else {   // holder
     for(const f of ['gaugeLen','boreDia'])

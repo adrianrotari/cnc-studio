@@ -4,7 +4,7 @@ let pass=0,fail=0;
 const ok=(cond,msg)=>{ if(cond){pass++;} else {fail++; console.error('FAIL:',msg); } };
 
 // ---- every seed schema-valid ----
-ok(Array.isArray(SEED_TOOLS) && SEED_TOOLS.length>=3,'SEED_TOOLS has >=3 entries');
+ok(Array.isArray(SEED_TOOLS) && SEED_TOOLS.length===4,'SEED_TOOLS has 4 entries');
 for(const t of SEED_TOOLS){
   const problems=validateTool(t);
   ok(problems.length===0, 'seed '+(t&&t.id)+' valid: '+problems.join('; '));
@@ -43,6 +43,21 @@ ok(cd.fzSide===0.050 && cd.aeSide===0.3 && cd.apSide===12,'Inova side data');
 ok(typeof cd.slotNote==='string' && /INOCUT/.test(cd.slotNote),'Inova slotNote present');
 ok('fzSlot' in cd,'fzSlot key present even though null');
 
+// ---- Inova 247 HPC (long flute, no cut data captured yet) ----
+const iv2=findToolById(SEED_TOOLS,'inova-247121-10');
+ok(iv2 && iv2.type==='endmill','Inova 247 endmill');
+ok(iv2.name==='Inova 247 HPC ø12 (247.121.10)' && iv2.orderNo==='247.121.10','247 name/orderNo');
+ok(iv2.dc===12 && iv2.z===3 && iv2.lc===26,'247 dc/z + longer 26mm flute');
+ok(iv2.neckDia===11.7 && iv2.reach===73 && iv2.oal===120,'247 neck/reach/oal');
+ok(iv2.cornerType==='chamfer 0.2x45' && iv2.coolantStyle==='IC','247 corner/coolant');
+ok(iv2.helixDeg===undefined && !iv2.coating,'247 helix/coating not captured');
+ok(iv2.cut===undefined,'247 has no cut data yet');
+ok(toolCutData(iv2)===null,'247 toolCutData null (no cut)');
+ok(validateTool(iv2).length===0,'247 valid despite missing cut');
+ok(Array.isArray(iv2.profile) && iv2.profile.length===8,'247 profile 8 pts');
+ok(iv2.profile[2][0]===26 && iv2.profile[2][1]===6,'247 flute zone ends at axial 26');
+ok(validateProfile(iv2.profile)===null,'247 profile valid');
+
 // ---- Sandvik holder ----
 const h=findToolById(SEED_TOOLS,'sandvik-930-c5-s-20-085');
 ok(h && h.type==='holder','Sandvik is a holder');
@@ -56,7 +71,7 @@ ok(!h.cut,'holder carries no cut data');
 
 // ---- type filtering (dropdown split) ----
 const em=toolsOfType(SEED_TOOLS,'endmill'), ho=toolsOfType(SEED_TOOLS,'holder');
-ok(em.length===2 && em.every(t=>t.type==='endmill'),'2 endmills, no holders');
+ok(em.length===3 && em.every(t=>t.type==='endmill'),'3 endmills, no holders');
 ok(ho.length===1 && ho[0].id==='sandvik-930-c5-s-20-085','1 holder');
 ok(toolsOfType(null,'endmill').length===0,'null list -> [] (no throw)');
 

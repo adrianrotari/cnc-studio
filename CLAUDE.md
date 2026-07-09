@@ -20,6 +20,10 @@ ES-module migration is allowed only as a dedicated refactor with browser testing
 keep them that way.
 The `/*__PARSER_START__*/ ... /*__PARSER_END__*/` markers are used by tooling; keep them.
 Tests: `node tests/{parser,geom,tools}.test.js` (all must stay green).
+Pure modules must keep the node export shim on ONE line, e.g.
+`if(typeof module!=='undefined'&&module.exports){ module.exports={...}; }` — `build.js`
+strips it with a single-line regex, so a multi-line shim leaves a dangling `}` that
+breaks the browser bundle (node tests still pass, since they require the raw file).
 
 ## Rules
 

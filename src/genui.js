@@ -36,12 +36,13 @@ function genPrefill(){
   }
 }
 $('tSel').addEventListener('change',genPrefill);
+function genAxisX(){ return typeof FIX!=='undefined' && FIX.b>=45; }   // B90 -> slice along bar axis X
 $('gZfit').onclick=()=>{
   if(!stepGroup.children.length) return;
   stepGroup.updateMatrixWorld(true);
   const mb=new THREE.Box3().setFromObject(stepGroup);
-  $('gZt').value=mb.max.z.toFixed(1);
-  $('gZb').value=mb.min.z.toFixed(1);
+  if(genAxisX()){ $('gZt').value=mb.max.x.toFixed(1); $('gZb').value=mb.min.x.toFixed(1); }
+  else { $('gZt').value=mb.max.z.toFixed(1); $('gZb').value=mb.min.z.toFixed(1); }
 };
 function collectTris(){
   const out=[];
@@ -73,9 +74,19 @@ $('gGo').onclick=()=>{
   const barR=Math.max(1,(parseFloat($('sDia').value)||90)/2);
   const rpm=Math.round(1000*vc/(Math.PI*D));
   const feed=Math.round(rpm*TOOL.z*fz);
+  const axX=genAxisX();
+  let tris=collectTris();
+  if(axX){                     // map bar-axis-X world -> generator frame: (x,y,z)->(y, z+barR, x)
+    const t2=new Array(tris.length);
+    for(let i=0;i<tris.length;i+=3){ t2[i]=tris[i+1]; t2[i+1]=tris[i+2]+barR; t2[i+2]=tris[i]; }
+    tris=t2;
+  }
   let segs;
-  try{ segs=genContourRough(collectTris(),{zTop:zT,zBot:zB,ap,ae,toolR,allow,barR,feed,plunge:Math.round(feed/3),rpm}); }
+  try{ segs=genContourRough(tris,{zTop:zT,zBot:zB,ap,ae,toolR,allow,barR,feed,plunge:Math.round(feed/3),rpm}); }
   catch(err){ $('fname').textContent='generator: '+err.message; return; }
+  if(axX){                     // map back: (X',Y',Z') -> (x=Z', y=X', z=Y'-barR)
+    for(const sg of segs) sg.pts=sg.pts.map(p=>[p[2],p[0],p[1]-barR]);
+  }
   if(!segs.length){ $('fname').textContent='generator made no passes — check Z range vs model'; return; }
   let cut=0,rap=0,zMin=1e9,zMax=-1e9;
   for(const sg of segs){
@@ -87,10 +98,10 @@ $('gGo').onclick=()=>{
   }
   const tMin=cut/feed + rap/12000;
   GENCOUNT++;
-  const s={id:1000+GENCOUNT, name:'GEN'+GENCOUNT+' CONTOUR ROUGH ø'+D,
-    tool:'GEN', toolTxt:'gen ø'+D, plane:17, color:'#ffd166',
+  const s={id:1000+GENCOUNT, name:'GEN'+GENCOUNT+' CONTOUR ROUGH ø'+D+(axX?' B-90':' B0'),
+    tool:'GEN', toolTxt:'gen ø'+D, plane:axX?19:17, color:'#ffd166',
     desc:['generated contour roughing'],
-    descTxt:'ae '+ae+' · ap '+ap+' · fz '+fz+' · vc '+vc+' · S'+rpm+' · F'+feed,
+    descTxt:'ae '+ae+' · ap '+ap+' · fz '+fz+' · vc '+vc+' · S'+rpm+' · F'+feed+(axX?' · along X':''),
     segs, cutLen:cut, rapLen:rap, tMin, zMin, zMax, calls:[], resolvedCalls:[], isRough12:false};
   SEC.push(s); visible.add(s.id);
   buildList(); rebuild3D(); buildTimeline(); updateHud();

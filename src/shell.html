@@ -149,8 +149,8 @@
       <div class="row"><button class="btn" id="fxB0" title="bar axis Z, vertical — sets stock sim axis Z">B0 vertical</button><button class="btn" id="fxB90" title="bar axis X, horizontal — sets stock sim axis X">B90 horizontal</button><button class="btn" id="fxCenter" title="center the model on the bar centerline">center in bar</button></div>
     </div>
     <div id="genbox">
-      <b style="color:var(--acc)">Generate — contour rough</b> <span style="color:var(--dim)">(tool axis Z)</span>
-      <div class="row"><label>Z top</label><input type="number" id="gZt" value="0" step="0.5"><label>Z bot</label><input type="number" id="gZb" value="-20" step="0.5"><button class="btn" id="gZfit" title="take the Z range from the model">fit Z</button></div>
+      <b style="color:var(--acc)">Generate — contour rough</b> <span style="color:var(--dim)" title="follows the chuck B angle: B0 slices Z levels (tool axis Z), B90 slices X levels into the bar face (tool axis X)">follows B</span>
+      <div class="row"><label title="B0: Z top · B90: bar face X">top</label><input type="number" id="gZt" value="0" step="0.5"><label title="B0: Z bottom · B90: deepest X">deep</label><input type="number" id="gZb" value="-20" step="0.5"><button class="btn" id="gZfit" title="take the range from the model">fit</button></div>
       <div class="row"><label>ap</label><input type="number" id="gAp" value="3" step="0.5"><label>ae</label><input type="number" id="gAe" value="8" step="0.5"><label>allow</label><input type="number" id="gAl" value="0.3" step="0.1"></div>
       <div class="row"><label>fz</label><input type="number" id="gFz" value="0.08" step="0.01"><label>vc</label><input type="number" id="gVc" value="300" step="10"><span style="color:var(--dim)" title="tool ø/z from the TOOL row, bar ø from the STOCK row">uses TOOL ø · bar ø</span></div>
       <div class="row"><button class="btn grn" id="gGo" title="generate roughing passes from bar ø down to the model silhouette + allowance">generate</button><button class="btn" id="gClr">remove gen ops</button></div>

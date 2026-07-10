@@ -49,6 +49,14 @@
   #fixbox input[type=number]{width:52px;background:#0a0e14;border:1px solid var(--line);color:var(--tx);border-radius:4px;padding:2px 4px;font-size:11px}
   #fixbox input[type=range]{accent-color:var(--acc)}
   #fixbox .row{display:flex;gap:5px;align-items:center;margin-top:5px;flex-wrap:wrap}
+  #genbox{position:absolute;bottom:8px;right:475px;background:#111823cc;border:1px solid var(--line);border-radius:8px;padding:8px;font-size:11px;width:252px}
+  #genbox label{color:var(--dim)}
+  #genbox input[type=number]{width:52px;background:#0a0e14;border:1px solid var(--line);color:var(--tx);border-radius:4px;padding:2px 4px;font-size:11px}
+  #genbox .row{display:flex;gap:5px;align-items:center;margin-top:5px;flex-wrap:wrap}
+  #toolbox{display:none;position:absolute;top:38px;left:50%;transform:translateX(-50%);width:min(880px,94%);background:#111823ee;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11.5px;z-index:30}
+  #toolbox table th{color:var(--dim);font-weight:600}
+  #toolbox table td,#toolbox table th{border-bottom:1px solid var(--line);padding:3px 7px;text-align:left;white-space:nowrap}
+  #toolbox .row{display:flex;gap:6px;align-items:center;justify-content:space-between}
   footer{grid-column:2;background:var(--panel);border-top:1px solid var(--line);padding:6px 12px;display:flex;flex-direction:column;gap:4px}
   #anim{display:flex;align-items:center;gap:10px}
   #seek{flex:1;accent-color:var(--acc)}
@@ -94,6 +102,7 @@
     <label class="sm"><input type="checkbox" id="ckCycle" checked> drill cycles</label>
     <label class="sm"><input type="checkbox" id="ckTool" checked> tool</label>
     <label class="sm" title="2.5D material-removal simulation (G17 ops)"><input type="checkbox" id="ckStock"> stock</label>
+    <button class="btn" id="bTools">Tools</button>
     <button class="btn acc" id="bChat">Chat</button>
     <input type="file" id="fnc" accept=".dnc,.nc,.txt,.tap,.min,.eia,.prg,*">
     <input type="file" id="fstp" accept=".stp,.step">
@@ -138,6 +147,17 @@
       <div class="row"><label><input type="checkbox" id="fxShow" checked> show</label><label>bar len</label><input type="number" id="fxLen" value="150" step="5" min="10"><label>mm · ø follows bar ø</label></div>
       <div class="row"><label>B</label><input type="range" id="fxB" min="0" max="90" value="0" step="1" style="flex:1"><span id="fxBv" style="font-family:Consolas,monospace;width:28px;text-align:right">0°</span></div>
       <div class="row"><button class="btn" id="fxB0" title="bar axis Z, vertical — sets stock sim axis Z">B0 vertical</button><button class="btn" id="fxB90" title="bar axis X, horizontal — sets stock sim axis X">B90 horizontal</button><button class="btn" id="fxCenter" title="center the model on the bar centerline">center in bar</button></div>
+    </div>
+    <div id="genbox">
+      <b style="color:var(--acc)">Generate — contour rough</b> <span style="color:var(--dim)">(tool axis Z)</span>
+      <div class="row"><label>Z top</label><input type="number" id="gZt" value="0" step="0.5"><label>Z bot</label><input type="number" id="gZb" value="-20" step="0.5"><button class="btn" id="gZfit" title="take the Z range from the model">fit Z</button></div>
+      <div class="row"><label>ap</label><input type="number" id="gAp" value="3" step="0.5"><label>ae</label><input type="number" id="gAe" value="8" step="0.5"><label>allow</label><input type="number" id="gAl" value="0.3" step="0.1"></div>
+      <div class="row"><label>fz</label><input type="number" id="gFz" value="0.08" step="0.01"><label>vc</label><input type="number" id="gVc" value="300" step="10"><span style="color:var(--dim)" title="tool ø/z from the TOOL row, bar ø from the STOCK row">uses TOOL ø · bar ø</span></div>
+      <div class="row"><button class="btn grn" id="gGo" title="generate roughing passes from bar ø down to the model silhouette + allowance">generate</button><button class="btn" id="gClr">remove gen ops</button></div>
+    </div>
+    <div id="toolbox">
+      <div class="row"><b style="color:var(--acc)">TOOL LIBRARY</b><button class="btn" id="tbClose">close</button></div>
+      <div id="toolTable" style="margin-top:6px;max-height:62vh;overflow:auto"></div>
     </div>
 
     <div id="chat">
@@ -586,6 +606,187 @@ function validateTool(t){
 }
 
 
+// ===== gen.js =====
+// ---------- pure toolpath generator (no DOM, node-testable) ----------
+// Contour roughing around a billet, tool axis Z (G17). At each Z level the
+// keep-out is the model silhouette (top-surface heightfield) at that depth;
+// passes are iso-distance contours of the keep-out stepped by ae, clipped to
+// the bar, outermost first. 2.5D assumption: no undercuts.
+// tris: flat [x,y,z]*3n in program coords. Returns [{kind,pts,f,s,line,src}].
+function genHeightfield(tris,x0,y0,nx,ny,cell){
+  const hf=new Float32Array(nx*ny).fill(-Infinity);
+  const n=Math.floor(tris.length/9);
+  for(let t=0;t<n;t++){
+    const ax=tris[t*9],ay=tris[t*9+1],az=tris[t*9+2],
+          bx=tris[t*9+3],by=tris[t*9+4],bz=tris[t*9+5],
+          cx=tris[t*9+6],cy=tris[t*9+7],cz=tris[t*9+8];
+    const minx=Math.min(ax,bx,cx),maxx=Math.max(ax,bx,cx);
+    const miny=Math.min(ay,by,cy),maxy=Math.max(ay,by,cy);
+    const i0=Math.max(0,Math.floor((minx-x0)/cell)),i1=Math.min(nx-1,Math.ceil((maxx-x0)/cell));
+    const j0=Math.max(0,Math.floor((miny-y0)/cell)),j1=Math.min(ny-1,Math.ceil((maxy-y0)/cell));
+    if(i1<i0||j1<j0)continue;
+    const d=(by-cy)*(ax-cx)+(cx-bx)*(ay-cy);
+    if(Math.abs(d)<1e-9){
+      const zt=Math.max(az,bz,cz);
+      for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++){const k=j*nx+i;if(zt>hf[k])hf[k]=zt;}
+      continue;
+    }
+    for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++){
+      const px=x0+i*cell,py=y0+j*cell;
+      const w0=((by-cy)*(px-cx)+(cx-bx)*(py-cy))/d;
+      const w1=((cy-ay)*(px-cx)+(ax-cx)*(py-cy))/d;
+      const w2=1-w0-w1;
+      if(w0<-0.05||w1<-0.05||w2<-0.05)continue;
+      const z=w0*az+w1*bz+w2*cz;
+      const k=j*nx+i;if(z>hf[k])hf[k]=z;
+    }
+  }
+  return hf;
+}
+// two-pass chamfer distance (mm) from mask cells (mask=1 -> distance 0)
+function genDist(mask,nx,ny,cell){
+  const INF=1e9, D=new Float32Array(nx*ny);
+  for(let k=0;k<nx*ny;k++) D[k]=mask[k]?0:INF;
+  const o=cell, di=cell*Math.SQRT2;
+  for(let j=0;j<ny;j++)for(let i=0;i<nx;i++){
+    const k=j*nx+i; let v=D[k];
+    if(i>0&&D[k-1]+o<v)v=D[k-1]+o;
+    if(j>0&&D[k-nx]+o<v)v=D[k-nx]+o;
+    if(i>0&&j>0&&D[k-nx-1]+di<v)v=D[k-nx-1]+di;
+    if(i<nx-1&&j>0&&D[k-nx+1]+di<v)v=D[k-nx+1]+di;
+    D[k]=v;
+  }
+  for(let j=ny-1;j>=0;j--)for(let i=nx-1;i>=0;i--){
+    const k=j*nx+i; let v=D[k];
+    if(i<nx-1&&D[k+1]+o<v)v=D[k+1]+o;
+    if(j<ny-1&&D[k+nx]+o<v)v=D[k+nx]+o;
+    if(i<nx-1&&j<ny-1&&D[k+nx+1]+di<v)v=D[k+nx+1]+di;
+    if(i>0&&j<ny-1&&D[k+nx-1]+di<v)v=D[k+nx-1]+di;
+    D[k]=v;
+  }
+  return D;
+}
+// marching squares at iso -> chained polylines [[x,y],...]
+function genIso(D,nx,ny,x0,y0,cell,iso){
+  const segs=[];
+  const L=(p,q)=>{const t=p/(p-q); return isFinite(t)?Math.min(1,Math.max(0,t)):0.5;};
+  for(let j=0;j<ny-1;j++)for(let i=0;i<nx-1;i++){
+    const a=D[j*nx+i]-iso, b=D[j*nx+i+1]-iso, c=D[(j+1)*nx+i+1]-iso, d2=D[(j+1)*nx+i]-iso;
+    const idx=(a<0?1:0)|(b<0?2:0)|(c<0?4:0)|(d2<0?8:0);
+    if(idx===0||idx===15)continue;
+    const X=x0+i*cell, Y=y0+j*cell;
+    const e={t:[X+cell*L(a,b),Y], r:[X+cell,Y+cell*L(b,c)],
+             b2:[X+cell*L(d2,c),Y+cell], l:[X,Y+cell*L(a,d2)]};
+    const add=(p,q)=>segs.push([e[p],e[q]]);
+    switch(idx){
+      case 1: add('l','t');break;  case 2: add('t','r');break;
+      case 3: add('l','r');break;  case 4: add('r','b2');break;
+      case 5: add('l','t');add('r','b2');break;
+      case 6: add('t','b2');break; case 7: add('l','b2');break;
+      case 8: add('b2','l');break; case 9: add('b2','t');break;
+      case 10:add('t','r');add('b2','l');break;
+      case 11:add('b2','r');break; case 12:add('r','l');break;
+      case 13:add('r','t');break;  case 14:add('t','l');break;
+    }
+  }
+  const key=p=>Math.round(p[0]*20)+'_'+Math.round(p[1]*20);
+  const map=new Map();
+  for(const s of segs)for(const end of [0,1]){
+    const k=key(s[end]); if(!map.has(k))map.set(k,[]); map.get(k).push(s);
+  }
+  const used=new Set(), polys=[];
+  for(const s of segs){
+    if(used.has(s))continue;
+    used.add(s);
+    const poly=[s[0],s[1]];
+    let guard=0;
+    while(guard++<200000){
+      const k=key(poly[poly.length-1]);
+      const cand=(map.get(k)||[]).find(x=>!used.has(x));
+      if(!cand)break;
+      used.add(cand);
+      poly.push(key(cand[0])===k?cand[1]:cand[0]);
+    }
+    guard=0;
+    while(guard++<200000){
+      const k=key(poly[0]);
+      const cand=(map.get(k)||[]).find(x=>!used.has(x));
+      if(!cand)break;
+      used.add(cand);
+      poly.unshift(key(cand[0])===k?cand[1]:cand[0]);
+    }
+    if(poly.length>=3)polys.push(poly);
+  }
+  return polys;
+}
+function genClipRuns(poly,maxR){
+  const runs=[]; let cur=[];
+  for(const p of poly){
+    if(Math.hypot(p[0],p[1])<=maxR) cur.push(p);
+    else { if(cur.length>1) runs.push(cur); cur=[]; }
+  }
+  if(cur.length>1) runs.push(cur);
+  return runs;
+}
+function genContourRough(tris,opts){
+  const ap=Math.max(0.2,opts.ap), ae=Math.max(0.2,opts.ae);
+  const toolR=opts.toolR, allow=Math.max(0,opts.allow||0), barR=opts.barR;
+  const zTop=opts.zTop, zBot=opts.zBot;
+  const clearZ=opts.clearZ!=null?opts.clearZ:zTop+5;
+  const f=Math.max(1,opts.feed||500), fp=Math.max(1,opts.plunge||Math.round(f/3));
+  const s=opts.rpm||null;
+  const cell=opts.cell||Math.max(0.4,Math.min(1.2,barR/120));
+  const R=barR+toolR+ae, maxR=barR+toolR;
+  const x0=-R-2*cell, y0=-R-2*cell;
+  const nx=Math.ceil((2*(R+2*cell))/cell)+1, ny=nx;
+  if(nx*ny>4.2e6) throw new Error('grid too large — raise cell size');
+  const hf=genHeightfield(tris,x0,y0,nx,ny,cell);
+  const segs=[]; let last=null;
+  const jump=to=>{
+    if(last&&Math.abs(last[2]-to[2])<1e-9&&Math.hypot(to[0]-last[0],to[1]-last[1])<=2.5*ae){
+      segs.push({kind:'feed',pts:[last,to],f,s,line:0,src:'generated'}); last=to; return;
+    }
+    const pts=last?[last,[last[0],last[1],clearZ],[to[0],to[1],clearZ],[to[0],to[1],to[2]+0.5]]
+                  :[[to[0],to[1],clearZ],[to[0],to[1],to[2]+0.5]];
+    segs.push({kind:'rapid',pts,f:null,s,line:0,src:'generated'});
+    segs.push({kind:'feed',pts:[[to[0],to[1],to[2]+0.5],to],f:fp,s,line:0,src:'generated'});
+    last=to;
+  };
+  const emitRing=(pts2,z)=>{
+    const p3=pts2.map(p=>[p[0],p[1],z]);
+    if(Math.hypot(p3[0][0]-p3[p3.length-1][0],p3[0][1]-p3[p3.length-1][1])<cell*1.6)
+      p3.push([p3[0][0],p3[0][1],z]);         // close the loop
+    jump(p3[0]);
+    segs.push({kind:'feed',pts:p3,f,s,line:0,src:'generated'});
+    last=p3[p3.length-1];
+  };
+  const levels=[];
+  for(let z=zTop-ap; z>zBot+1e-6; z-=ap) levels.push(+z.toFixed(4));
+  levels.push(zBot);
+  for(const z of levels){
+    const mask=new Uint8Array(nx*ny);
+    let any=0;
+    for(let k=0;k<nx*ny;k++){ if(hf[k]>z+1e-4){mask[k]=1;any=1;} }
+    if(!any){                                  // nothing in the way — plain face clearing rings
+      for(let r=maxR-ae; r>ae*0.4; r-=ae){
+        const pts=[]; for(let i=0;i<=72;i++){const a2=i*2*Math.PI/72; pts.push([r*Math.cos(a2),r*Math.sin(a2)]);}
+        emitRing(pts,z);
+      }
+      continue;
+    }
+    const D=genDist(mask,nx,ny,cell);
+    const kMax=Math.ceil(2*R/ae);
+    for(let k2=kMax;k2>=0;k2--){
+      const iso=toolR+allow+k2*ae;
+      const polys=genIso(D,nx,ny,x0,y0,cell,iso);
+      for(const poly of polys)
+        for(const run of genClipRuns(poly,maxR))
+          emitRing(run,z);
+    }
+  }
+  return segs;
+}
+
 // ===== scene.js =====
 // ---------------- 3D scene ----------------
 let scene,camera,renderer,pathGroup,stepGroup,toolGroup,stockGroup,GRID;
@@ -796,7 +997,6 @@ function loadNC(text,name){
   if(res)  status+='  ·  '+res+' call'+(res>1?'s':'')+' inlined';
   if(unres) status+='  ·  ⚠ '+unres+' unresolved';
   document.getElementById('fname').textContent=status;
-  document.getElementById('drop').style.display='none';
   document.getElementById('drop').style.display='none';
   SEC.forEach((s,i)=>{ s.id=i; s.color = s.isRough12 ? '#38e07b' : PAL[(i%(PAL.length-1))+1]; });
   const rough=SEC.filter(s=>s.isRough12);
@@ -1634,6 +1834,112 @@ $('fxCenter').onclick=()=>{             // center the model on the bar centerlin
 $('sAxis').addEventListener('change',e=>fixtureSetB(e.target.value==='Z'?0:90));
 $('sDia').addEventListener('change',fixtureBuild);
 $('sTop').addEventListener('change',fixturePlace);
+
+// ===== genui.js =====
+// ---------------- tool library viewer + toolpath generator UI ----------------
+let GENCOUNT=0;
+function toolTableRender(){
+  const box=$('toolTable'); if(!box) return;
+  const rows=[];
+  rows.push('<tr><th>name</th><th>vendor</th><th>order no</th><th>type</th><th>ø</th><th>z</th><th>lc</th><th>vc</th><th>fz side</th><th>fz slot</th><th></th></tr>');
+  for(const t of allTools()){
+    const cd=toolCutData(t)||{};
+    const user=String(t.id).startsWith('user-');
+    rows.push('<tr><td title="'+(t.note||'')+'">'+t.name+'</td><td>'+(t.vendor||'')+'</td><td>'+(t.orderNo||'')+'</td><td>'+(t.type||'endmill')+'</td>'+
+      '<td>'+(t.dc!=null?t.dc:'—')+'</td><td>'+(t.z!=null?t.z:'—')+'</td><td>'+(t.lc!=null?t.lc:'—')+'</td>'+
+      '<td>'+(cd.vc!=null?cd.vc:'—')+'</td><td>'+(cd.fzSide!=null?cd.fzSide:'—')+'</td><td>'+(cd.fzSlot===null?'none':(cd.fzSlot!=null?cd.fzSlot:'—'))+'</td>'+
+      '<td>'+(user?'<button class="btn" data-del="'+t.id+'" style="padding:0 6px;font-size:10px">✕</button>':'')+'</td></tr>');
+  }
+  box.innerHTML='<table style="border-collapse:collapse;width:100%">'+rows.join('')+'</table>';
+  box.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
+    USER_TOOLS=USER_TOOLS.filter(t=>t.id!==b.dataset.del);
+    try{ localStorage.setItem(TOOLS_LSKEY,JSON.stringify(USER_TOOLS)); }catch(_){}
+    buildToolSelect(); buildHolderSelect(); toolTableRender();
+  });
+}
+$('bTools').onclick=()=>{
+  const p=$('toolbox');
+  const show=p.style.display!=='block';
+  p.style.display=show?'block':'none';
+  if(show) toolTableRender();
+};
+$('tbClose').onclick=()=>{ $('toolbox').style.display='none'; };
+// prefill fz/vc from the selected library tool's cut data
+function genPrefill(){
+  const cd=TOOL.lib?toolCutData(TOOL.lib):null;
+  if(cd){
+    if(cd.vc) $('gVc').value=cd.vc;
+    const fz=cd.fzSide!=null?cd.fzSide:cd.fzSlot;
+    if(fz!=null) $('gFz').value=fz;
+  }
+}
+$('tSel').addEventListener('change',genPrefill);
+$('gZfit').onclick=()=>{
+  if(!stepGroup.children.length) return;
+  stepGroup.updateMatrixWorld(true);
+  const mb=new THREE.Box3().setFromObject(stepGroup);
+  $('gZt').value=mb.max.z.toFixed(1);
+  $('gZb').value=mb.min.z.toFixed(1);
+};
+function collectTris(){
+  const out=[];
+  stepGroup.updateMatrixWorld(true);
+  const A=new THREE.Vector3(),B=new THREE.Vector3(),C=new THREE.Vector3();
+  stepGroup.traverse(o=>{
+    if(!o.isMesh)return;
+    const pa=o.geometry.attributes.position, ia=o.geometry.index;
+    const cnt=ia?ia.count:pa.count;
+    for(let t=0;t<cnt;t+=3){
+      A.fromBufferAttribute(pa,ia?ia.getX(t):t).applyMatrix4(o.matrixWorld);
+      B.fromBufferAttribute(pa,ia?ia.getX(t+1):t+1).applyMatrix4(o.matrixWorld);
+      C.fromBufferAttribute(pa,ia?ia.getX(t+2):t+2).applyMatrix4(o.matrixWorld);
+      out.push(A.x,A.y,A.z,B.x,B.y,B.z,C.x,C.y,C.z);
+    }
+  });
+  return out;
+}
+$('gGo').onclick=()=>{
+  if(!stepGroup.children.length){ $('fname').textContent='load a STEP model first — the generator works from the model silhouette'; return; }
+  const D=TOOL.d, toolR=D/2;
+  const zT=parseFloat($('gZt').value), zB=parseFloat($('gZb').value);
+  if(!isFinite(zT)||!isFinite(zB)||zB>=zT){ $('fname').textContent='generator: Z top must be above Z bottom'; return; }
+  const ap=Math.max(0.2,parseFloat($('gAp').value)||3);
+  const ae=Math.max(0.2,parseFloat($('gAe').value)||D*0.6);
+  const allow=Math.max(0,parseFloat($('gAl').value)||0);
+  const fz=Math.max(0.001,parseFloat($('gFz').value)||0.08);
+  const vc=Math.max(10,parseFloat($('gVc').value)||300);
+  const barR=Math.max(1,(parseFloat($('sDia').value)||90)/2);
+  const rpm=Math.round(1000*vc/(Math.PI*D));
+  const feed=Math.round(rpm*TOOL.z*fz);
+  let segs;
+  try{ segs=genContourRough(collectTris(),{zTop:zT,zBot:zB,ap,ae,toolR,allow,barR,feed,plunge:Math.round(feed/3),rpm}); }
+  catch(err){ $('fname').textContent='generator: '+err.message; return; }
+  if(!segs.length){ $('fname').textContent='generator made no passes — check Z range vs model'; return; }
+  let cut=0,rap=0,zMin=1e9,zMax=-1e9;
+  for(const sg of segs){
+    for(let i=1;i<sg.pts.length;i++){
+      const a=sg.pts[i-1],b=sg.pts[i],l=Math.hypot(b[0]-a[0],b[1]-a[1],b[2]-a[2]);
+      if(sg.kind==='feed')cut+=l; else rap+=l;
+    }
+    for(const p of sg.pts){ if(p[2]<zMin)zMin=p[2]; if(p[2]>zMax)zMax=p[2]; }
+  }
+  const tMin=cut/feed + rap/12000;
+  GENCOUNT++;
+  const s={id:1000+GENCOUNT, name:'GEN'+GENCOUNT+' CONTOUR ROUGH ø'+D,
+    tool:'GEN', toolTxt:'gen ø'+D, plane:17, color:'#ffd166',
+    desc:['generated contour roughing'],
+    descTxt:'ae '+ae+' · ap '+ap+' · fz '+fz+' · vc '+vc+' · S'+rpm+' · F'+feed,
+    segs, cutLen:cut, rapLen:rap, tMin, zMin, zMax, calls:[], resolvedCalls:[], isRough12:false};
+  SEC.push(s); visible.add(s.id);
+  buildList(); rebuild3D(); buildTimeline(); updateHud();
+  $('cut').style.display='block';
+  $('fname').textContent=s.name+' — '+(cut/1000).toFixed(2)+' m cutting, ~'+tMin.toFixed(1)+' min';
+};
+$('gClr').onclick=()=>{
+  SEC=SEC.filter(x=>x.tool!=='GEN');
+  visible=new Set([...visible].filter(id=>SEC.some(x=>x.id===id)));
+  buildList(); rebuild3D(); buildTimeline(); updateHud();
+};
 
 // ===== main.js =====
 // ---------------- boot ----------------

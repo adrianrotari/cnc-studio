@@ -49,6 +49,14 @@
   #fixbox input[type=number]{width:52px;background:#0a0e14;border:1px solid var(--line);color:var(--tx);border-radius:4px;padding:2px 4px;font-size:11px}
   #fixbox input[type=range]{accent-color:var(--acc)}
   #fixbox .row{display:flex;gap:5px;align-items:center;margin-top:5px;flex-wrap:wrap}
+  #genbox{position:absolute;bottom:8px;right:475px;background:#111823cc;border:1px solid var(--line);border-radius:8px;padding:8px;font-size:11px;width:252px}
+  #genbox label{color:var(--dim)}
+  #genbox input[type=number]{width:52px;background:#0a0e14;border:1px solid var(--line);color:var(--tx);border-radius:4px;padding:2px 4px;font-size:11px}
+  #genbox .row{display:flex;gap:5px;align-items:center;margin-top:5px;flex-wrap:wrap}
+  #toolbox{display:none;position:absolute;top:38px;left:50%;transform:translateX(-50%);width:min(880px,94%);background:#111823ee;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11.5px;z-index:30}
+  #toolbox table th{color:var(--dim);font-weight:600}
+  #toolbox table td,#toolbox table th{border-bottom:1px solid var(--line);padding:3px 7px;text-align:left;white-space:nowrap}
+  #toolbox .row{display:flex;gap:6px;align-items:center;justify-content:space-between}
   footer{grid-column:2;background:var(--panel);border-top:1px solid var(--line);padding:6px 12px;display:flex;flex-direction:column;gap:4px}
   #anim{display:flex;align-items:center;gap:10px}
   #seek{flex:1;accent-color:var(--acc)}
@@ -94,6 +102,7 @@
     <label class="sm"><input type="checkbox" id="ckCycle" checked> drill cycles</label>
     <label class="sm"><input type="checkbox" id="ckTool" checked> tool</label>
     <label class="sm" title="2.5D material-removal simulation (G17 ops)"><input type="checkbox" id="ckStock"> stock</label>
+    <button class="btn" id="bTools">Tools</button>
     <button class="btn acc" id="bChat">Chat</button>
     <input type="file" id="fnc" accept=".dnc,.nc,.txt,.tap,.min,.eia,.prg,*">
     <input type="file" id="fstp" accept=".stp,.step">
@@ -138,6 +147,17 @@
       <div class="row"><label><input type="checkbox" id="fxShow" checked> show</label><label>bar len</label><input type="number" id="fxLen" value="150" step="5" min="10"><label>mm · ø follows bar ø</label></div>
       <div class="row"><label>B</label><input type="range" id="fxB" min="0" max="90" value="0" step="1" style="flex:1"><span id="fxBv" style="font-family:Consolas,monospace;width:28px;text-align:right">0°</span></div>
       <div class="row"><button class="btn" id="fxB0" title="bar axis Z, vertical — sets stock sim axis Z">B0 vertical</button><button class="btn" id="fxB90" title="bar axis X, horizontal — sets stock sim axis X">B90 horizontal</button><button class="btn" id="fxCenter" title="center the model on the bar centerline">center in bar</button></div>
+    </div>
+    <div id="genbox">
+      <b style="color:var(--acc)">Generate — contour rough</b> <span style="color:var(--dim)">(tool axis Z)</span>
+      <div class="row"><label>Z top</label><input type="number" id="gZt" value="0" step="0.5"><label>Z bot</label><input type="number" id="gZb" value="-20" step="0.5"><button class="btn" id="gZfit" title="take the Z range from the model">fit Z</button></div>
+      <div class="row"><label>ap</label><input type="number" id="gAp" value="3" step="0.5"><label>ae</label><input type="number" id="gAe" value="8" step="0.5"><label>allow</label><input type="number" id="gAl" value="0.3" step="0.1"></div>
+      <div class="row"><label>fz</label><input type="number" id="gFz" value="0.08" step="0.01"><label>vc</label><input type="number" id="gVc" value="300" step="10"><span style="color:var(--dim)" title="tool ø/z from the TOOL row, bar ø from the STOCK row">uses TOOL ø · bar ø</span></div>
+      <div class="row"><button class="btn grn" id="gGo" title="generate roughing passes from bar ø down to the model silhouette + allowance">generate</button><button class="btn" id="gClr">remove gen ops</button></div>
+    </div>
+    <div id="toolbox">
+      <div class="row"><b style="color:var(--acc)">TOOL LIBRARY</b><button class="btn" id="tbClose">close</button></div>
+      <div id="toolTable" style="margin-top:6px;max-height:62vh;overflow:auto"></div>
     </div>
 
     <div id="chat">

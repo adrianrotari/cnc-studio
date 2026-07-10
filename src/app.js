@@ -40,7 +40,6 @@ function loadNC(text,name){
   if(unres) status+='  ·  ⚠ '+unres+' unresolved';
   document.getElementById('fname').textContent=status;
   document.getElementById('drop').style.display='none';
-  document.getElementById('drop').style.display='none';
   SEC.forEach((s,i)=>{ s.id=i; s.color = s.isRough12 ? '#38e07b' : PAL[(i%(PAL.length-1))+1]; });
   const rough=SEC.filter(s=>s.isRough12);
   visible=new Set((rough.length?rough:SEC.filter(s=>s.segs.length)).map(s=>s.id));

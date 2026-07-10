@@ -3,7 +3,7 @@
 // exactly mirroring the proven monolith. Do not reorder without testing.
 const fs=require('fs'), path=require('path');
 const SRC=path.join(__dirname,'src'), DIST=path.join(__dirname,'dist');
-const ORDER=['parser.js','geom.js','tools.js','scene.js','app.js','anim.js','step.js','chat.js','stock.js','main.js'];
+const ORDER=['parser.js','geom.js','tools.js','scene.js','app.js','anim.js','step.js','chat.js','stock.js','fixture.js','main.js'];
 const shell=fs.readFileSync(path.join(SRC,'shell.html'),'utf8');
 const js=ORDER.map(f=>{
   let t=fs.readFileSync(path.join(SRC,f),'utf8');

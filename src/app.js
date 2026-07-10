@@ -101,6 +101,7 @@ function rebuild3D(){
     if(showR) mk(rap,0xff5c5c,0.28);
     if(showC) mk(cyc,0xffb347,0.9);
   }
+  if(typeof fixturePlace!=='undefined') fixturePlace();   // horizontal tip follows path extent
 }
 function bboxVisible(){
   const bb=new THREE.Box3();

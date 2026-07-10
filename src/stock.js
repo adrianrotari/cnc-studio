@@ -246,7 +246,7 @@ function autoAlign(){
   ['stX','stY','stZ'].forEach((id,i)=>$(id).value=stepGroup.position.getComponent(i).toFixed(1));
 }
 function stockRefresh(){ if(STK.on){ stockInit(); if(STK.grid) stampTo(tlPos); } }
-$('stAuto').onclick=()=>{ autoAlign(); stockRefresh(); };
+$('stAuto').onclick=()=>{ autoAlign(); MODELPOS.owned=true; modelPosSave(); stockRefresh(); };
 $('ckStock').onchange=e=>{
   STK.on=e.target.checked;
   if(STK.on) stockRefresh();

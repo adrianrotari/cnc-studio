@@ -1,4 +1,17 @@
 // ---------------- STEP loader (occt-import-js, lazy from CDN) ----------------
+// Model placement is user-owned once touched: saved per model name (localStorage),
+// restored on reload, and program load no longer auto-aligns over it.
+let MODELNAME='', MODELPOS={owned:false};
+const MODELPOS_KEY=n=>'cncstudio.modelpos.'+n;
+function modelPosSave(){
+  if(!MODELNAME||!stepGroup) return;
+  try{ localStorage.setItem(MODELPOS_KEY(MODELNAME),JSON.stringify(
+    {p:stepGroup.position.toArray(),r:[stepGroup.rotation.x,stepGroup.rotation.y,stepGroup.rotation.z]})); }catch(_){}
+}
+function modelPosChanged(final){
+  MODELPOS.owned=true; modelPosSave();
+  if(final&&$('sMode').value==='model') stockRefresh();
+}
 let occtReady=null;
 function loadOcct(){
   if(occtReady) return occtReady;
@@ -29,16 +42,27 @@ async function loadSTEP(buf,name){
     }
     stepGroup.userData.mat=mat;
     document.getElementById('stepbox').style.display='block';
-    autoAlign();
-    document.getElementById('fname').textContent=name+' loaded — auto-aligned to path (model top → Z0); adjust with rot/offset if needed';
+    MODELNAME=name;
+    let saved=null; try{ saved=JSON.parse(localStorage.getItem(MODELPOS_KEY(name))||'null'); }catch(_){}
+    if(saved&&saved.p){
+      stepGroup.position.fromArray(saved.p);
+      stepGroup.rotation.set(saved.r[0]||0,saved.r[1]||0,saved.r[2]||0);
+      MODELPOS.owned=true;
+      ['stX','stY','stZ'].forEach((id,i)=>document.getElementById(id).value=stepGroup.position.getComponent(i).toFixed(1));
+      document.getElementById('fname').textContent=name+' loaded — saved position restored · Ctrl+drag moves it, auto-align resets';
+    } else {
+      MODELPOS.owned=false;
+      autoAlign();
+      document.getElementById('fname').textContent=name+' loaded — auto-aligned to path (model top → Z0) · Ctrl+drag moves it';
+    }
   }catch(err){
     document.getElementById('fname').textContent='STEP load failed: '+err.message+' (internet needed for the 3D engine)';
   }
 }
 document.getElementById('stOp').oninput=e=>{if(stepGroup.userData.mat)stepGroup.userData.mat.opacity=e.target.value/100;};
 document.getElementById('stShow').onchange=e=>stepGroup.visible=e.target.checked;
-document.querySelectorAll('#stepbox [data-r]').forEach(b=>b.onclick=()=>{stepGroup.rotation[b.dataset.r]+=Math.PI/2;});
-['stX','stY','stZ'].forEach((id,i)=>document.getElementById(id).oninput=e=>{stepGroup.position.setComponent(i,parseFloat(e.target.value)||0);});
+document.querySelectorAll('#stepbox [data-r]').forEach(b=>b.onclick=()=>{stepGroup.rotation[b.dataset.r]+=Math.PI/2; modelPosChanged(true);});
+['stX','stY','stZ'].forEach((id,i)=>document.getElementById(id).oninput=e=>{stepGroup.position.setComponent(i,parseFloat(e.target.value)||0); modelPosChanged(false);});
 
 // ---------------- file handling ----------------
 function routeFile(file){

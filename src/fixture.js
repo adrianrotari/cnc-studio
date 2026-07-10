@@ -5,7 +5,11 @@
 //         matches billetHeight axis 'X'. Free end faces +X (part side).
 // Bar ø follows the STOCK `bar ø` field (sDia). Does not affect the cut sim.
 let fixtureGroup=null;
-const FIX={b:0,len:150,tipX:80};
+const FIX={b:0,len:150,tipX:80,show:true};
+const FIX_LSKEY='cncstudio.fixture';
+(function(){ try{ const s=JSON.parse(localStorage.getItem(FIX_LSKEY)||'null');
+  if(s){ FIX.b=Math.min(90,Math.max(0,+s.b||0)); FIX.len=Math.min(2000,Math.max(10,+s.len||150)); FIX.show=s.show!==false; } }catch(_){} })();
+function fixSave(){ try{ localStorage.setItem(FIX_LSKEY,JSON.stringify({b:FIX.b,len:FIX.len,show:FIX.show})); }catch(_){} }
 function fixDia(){ return Math.max(1,parseFloat($('sDia').value)||90); }
 function fixTop(){ const v=parseFloat($('sTop').value); return isFinite(v)?v:0.5; }
 function fixTipX(){
@@ -49,20 +53,37 @@ function fixturePlace(){
   const vz=fixTop(), hx=fixTipX();
   fixtureGroup.position.set(hx*t, 0, vz+(-r-vz)*t);
   fixtureGroup.rotation.set(0,FIX.b*Math.PI/180,0);
+  updateGridZ();
+}
+// grid always sits under everything — toolpath and fixture alike
+function updateGridZ(){
+  if(typeof GRID==='undefined'||!GRID) return;
+  let z=0;
+  if(typeof SEC!=='undefined'&&SEC.length){ const bb=bboxVisible(); if(bb) z=bb.min.z; }
+  if(fixtureGroup&&fixtureGroup.visible){
+    fixtureGroup.updateMatrixWorld(true);
+    const fb=new THREE.Box3().setFromObject(fixtureGroup);
+    if(isFinite(fb.min.z)) z=Math.min(z,fb.min.z);
+  }
+  GRID.position.z=z-1;
 }
 function fixtureSetB(v){
   FIX.b=Math.min(90,Math.max(0,v));
   $('fxB').value=FIX.b; $('fxBv').textContent=FIX.b.toFixed(0)+'°';
+  fixSave();
   fixturePlace();
 }
 function fixtureInit(){
   fixtureGroup=new THREE.Group(); scene.add(fixtureGroup);
-  fixtureGroup.visible=$('fxShow').checked;
+  $('fxShow').checked=FIX.show; $('fxLen').value=FIX.len;
+  $('fxB').value=FIX.b; $('fxBv').textContent=FIX.b.toFixed(0)+'°';
+  fixtureGroup.visible=FIX.show;
   fixtureBuild();
 }
-$('fxShow').onchange=e=>{ if(fixtureGroup) fixtureGroup.visible=e.target.checked; };
+$('fxShow').onchange=e=>{ FIX.show=e.target.checked; fixSave();
+  if(fixtureGroup){ fixtureGroup.visible=FIX.show; updateGridZ(); } };
 $('fxLen').onchange=e=>{ let v=parseFloat(e.target.value); if(!isFinite(v)) v=150;
-  v=Math.min(2000,Math.max(10,v)); e.target.value=v; FIX.len=v; fixtureBuild(); };
+  v=Math.min(2000,Math.max(10,v)); e.target.value=v; FIX.len=v; fixSave(); fixtureBuild(); };
 $('fxB').oninput=e=>fixtureSetB(parseFloat(e.target.value)||0);
 $('fxB0').onclick=()=>{ fixtureSetB(0); if($('sAxis').value!=='Z'){ $('sAxis').value='Z'; stockRefresh(); } };
 $('fxB90').onclick=()=>{ fixtureSetB(90); if($('sAxis').value!=='X'){ $('sAxis').value='X'; stockRefresh(); } };

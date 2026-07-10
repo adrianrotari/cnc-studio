@@ -45,7 +45,7 @@ function loadNC(text,name){
   visible=new Set((rough.length?rough:SEC.filter(s=>s.segs.length)).map(s=>s.id));
   buildList(); rebuild3D(); fitView(); buildTimeline(); updateHud();
   document.getElementById('cut').style.display='block';
-  autoAlign();
+  if(!MODELPOS.owned) autoAlign();      // never move a model the user has placed
 }
 
 function fmt(n,d=1){return isFinite(n)?n.toFixed(d):'—';}
@@ -116,6 +116,7 @@ function fitView(){
   const size=bb.getSize(new THREE.Vector3()).length();
   dist=Math.max(40,size*0.9);
   if(GRID) GRID.position.z=bb.min.z-1;   // grid sits under the work, not through it
+  if(typeof updateGridZ!=='undefined') updateGridZ();
 }
 function updateHud(){
   let cut=0,rap=0,t=0,n=0;

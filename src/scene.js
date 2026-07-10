@@ -31,13 +31,41 @@ function updateCam(){
 }
 function animate(){ requestAnimationFrame(animate); stepAnim(); updateCam(); renderer.render(scene,camera); }
 
-// mouse orbit
+// mouse orbit + Ctrl-drag STEP model placement
 let drag=null;
+const RAY=new THREE.Raycaster();
+function rayOnZ(e,z0){            // pointer ray ∩ horizontal plane z=z0
+  const r=cv.getBoundingClientRect();
+  const nd=new THREE.Vector2(((e.clientX-r.left)/r.width)*2-1,-((e.clientY-r.top)/r.height)*2+1);
+  RAY.setFromCamera(nd,camera);
+  const d=RAY.ray.direction.z; if(Math.abs(d)<1e-6) return null;
+  const t=(z0-RAY.ray.origin.z)/d; if(t<0) return null;
+  return RAY.ray.origin.clone().addScaledVector(RAY.ray.direction,t);
+}
 cv.addEventListener('contextmenu',e=>e.preventDefault());
-cv.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY,b:e.button,sh:e.shiftKey};cv.setPointerCapture(e.pointerId);});
-cv.addEventListener('pointerup',()=>drag=null);
+cv.addEventListener('pointerdown',e=>{
+  if(e.ctrlKey&&e.button===0&&stepGroup&&stepGroup.children.length){
+    const z0=stepGroup.position.z;    // Ctrl = move model XY · Ctrl+Shift = move model Z
+    drag={mode:'model',sy:e.clientY,z0,hit:rayOnZ(e,z0),p0:stepGroup.position.clone(),sh:e.shiftKey};
+  } else drag={x:e.clientX,y:e.clientY,b:e.button,sh:e.shiftKey};
+  cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener('pointerup',()=>{
+  if(drag&&drag.mode==='model'&&typeof modelPosChanged!=='undefined') modelPosChanged(true);
+  drag=null;
+});
 cv.addEventListener('pointermove',e=>{
   if(!drag)return;
+  if(drag.mode==='model'){
+    if(drag.sh){ stepGroup.position.z=drag.p0.z+(drag.sy-e.clientY)*dist/700; }
+    else { const pt=rayOnZ(e,drag.z0);
+      if(pt&&drag.hit){ stepGroup.position.x=drag.p0.x+pt.x-drag.hit.x;
+                        stepGroup.position.y=drag.p0.y+pt.y-drag.hit.y; } }
+    ['stX','stY','stZ'].forEach((id,i)=>{const el=document.getElementById(id);
+      if(el) el.value=stepGroup.position.getComponent(i).toFixed(1);});
+    if(typeof modelPosChanged!=='undefined') modelPosChanged(false);
+    return;
+  }
   const dx=e.clientX-drag.x, dy=e.clientY-drag.y; drag.x=e.clientX; drag.y=e.clientY;
   if(drag.b===2||drag.sh){
     const s=dist/700;

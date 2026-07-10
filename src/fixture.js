@@ -87,6 +87,21 @@ $('fxLen').onchange=e=>{ let v=parseFloat(e.target.value); if(!isFinite(v)) v=15
 $('fxB').oninput=e=>fixtureSetB(parseFloat(e.target.value)||0);
 $('fxB0').onclick=()=>{ fixtureSetB(0); if($('sAxis').value!=='Z'){ $('sAxis').value='Z'; stockRefresh(); } };
 $('fxB90').onclick=()=>{ fixtureSetB(90); if($('sAxis').value!=='X'){ $('sAxis').value='X'; stockRefresh(); } };
+$('fxCenter').onclick=()=>{             // center the model on the bar centerline
+  if(!stepGroup.children.length) return;
+  stepGroup.updateMatrixWorld(true);
+  const mb=new THREE.Box3().setFromObject(stepGroup), mc=mb.getCenter(new THREE.Vector3());
+  const r=fixDia()/2;
+  if(FIX.b>=45){                        // horizontal bar: centerline y=0, z=-r
+    stepGroup.position.y+=0-mc.y;
+    stepGroup.position.z+=(-r)-mc.z;
+  } else {                              // vertical bar: centerline x=0, y=0
+    stepGroup.position.x+=0-mc.x;
+    stepGroup.position.y+=0-mc.y;
+  }
+  ['stX','stY','stZ'].forEach((id,i)=>$(id).value=stepGroup.position.getComponent(i).toFixed(1));
+  modelPosChanged(true);
+};
 $('sAxis').addEventListener('change',e=>fixtureSetB(e.target.value==='Z'?0:90));
 $('sDia').addEventListener('change',fixtureBuild);
 $('sTop').addEventListener('change',fixturePlace);

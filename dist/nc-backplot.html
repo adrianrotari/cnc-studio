@@ -131,12 +131,13 @@
       <div class="row">rot <button class="btn" data-r="x">X+90</button><button class="btn" data-r="y">Y+90</button><button class="btn" data-r="z">Z+90</button></div>
       <div class="row">off <label>X</label><input type="number" id="stX" value="0" step="1"><label>Y</label><input type="number" id="stY" value="0" step="1"><label>Z</label><input type="number" id="stZ" value="0" step="1"></div>
       <div class="row"><button class="btn grn" id="stAuto" title="center model on the toolpath, model top face to Z0">auto-align to path</button><label><input type="checkbox" id="stShow" checked> visible</label></div>
+      <div class="row"><button class="btn" id="stPick" title="click this, then click a point on the model — that point becomes X0 Y0 Z0">pick 0 on model</button></div>
     </div>
     <div id="fixbox">
       <b style="color:var(--acc)">Chuck + stock</b>
       <div class="row"><label><input type="checkbox" id="fxShow" checked> show</label><label>bar len</label><input type="number" id="fxLen" value="150" step="5" min="10"><label>mm · ø follows bar ø</label></div>
       <div class="row"><label>B</label><input type="range" id="fxB" min="0" max="90" value="0" step="1" style="flex:1"><span id="fxBv" style="font-family:Consolas,monospace;width:28px;text-align:right">0°</span></div>
-      <div class="row"><button class="btn" id="fxB0" title="bar axis Z, vertical — sets stock sim axis Z">B0 vertical</button><button class="btn" id="fxB90" title="bar axis X, horizontal — sets stock sim axis X">B90 horizontal</button></div>
+      <div class="row"><button class="btn" id="fxB0" title="bar axis Z, vertical — sets stock sim axis Z">B0 vertical</button><button class="btn" id="fxB90" title="bar axis X, horizontal — sets stock sim axis X">B90 horizontal</button><button class="btn" id="fxCenter" title="center the model on the bar centerline">center in bar</button></div>
     </div>
 
     <div id="chat">
@@ -632,6 +633,12 @@ function rayOnZ(e,z0){            // pointer ray ∩ horizontal plane z=z0
 }
 cv.addEventListener('contextmenu',e=>e.preventDefault());
 cv.addEventListener('pointerdown',e=>{
+  if(typeof PICK0!=='undefined'&&PICK0&&e.button===0){
+    if(typeof pickZeroAt!=='undefined') pickZeroAt(e);
+    PICK0=false; cv.style.cursor='';
+    const pb=document.getElementById('stPick'); if(pb) pb.classList.remove('acc');
+    return;
+  }
   if(e.ctrlKey&&e.button===0&&stepGroup&&stepGroup.children.length){
     const z0=stepGroup.position.z;    // Ctrl = move model XY · Ctrl+Shift = move model Z
     drag={mode:'model',sy:e.clientY,z0,hit:rayOnZ(e,z0),p0:stepGroup.position.clone(),sh:e.shiftKey};
@@ -789,6 +796,7 @@ function loadNC(text,name){
   if(res)  status+='  ·  '+res+' call'+(res>1?'s':'')+' inlined';
   if(unres) status+='  ·  ⚠ '+unres+' unresolved';
   document.getElementById('fname').textContent=status;
+  document.getElementById('drop').style.display='none';
   document.getElementById('drop').style.display='none';
   SEC.forEach((s,i)=>{ s.id=i; s.color = s.isRough12 ? '#38e07b' : PAL[(i%(PAL.length-1))+1]; });
   const rough=SEC.filter(s=>s.isRough12);
@@ -967,6 +975,7 @@ async function loadSTEP(buf,name){
     }
     stepGroup.userData.mat=mat;
     document.getElementById('stepbox').style.display='block';
+    document.getElementById('drop').style.display='none';
     MODELNAME=name;
     let saved=null; try{ saved=JSON.parse(localStorage.getItem(MODELPOS_KEY(name))||'null'); }catch(_){}
     if(saved&&saved.p){
@@ -986,6 +995,27 @@ async function loadSTEP(buf,name){
 }
 document.getElementById('stOp').oninput=e=>{if(stepGroup.userData.mat)stepGroup.userData.mat.opacity=e.target.value/100;};
 document.getElementById('stShow').onchange=e=>stepGroup.visible=e.target.checked;
+// pick program zero: arm, then click a model point — model shifts so that point = X0 Y0 Z0
+let PICK0=false;
+document.getElementById('stPick').onclick=()=>{
+  PICK0=!PICK0;
+  document.getElementById('stPick').classList.toggle('acc',PICK0);
+  cv.style.cursor=PICK0?'crosshair':'';
+};
+function pickZeroAt(e){
+  if(!stepGroup.children.length) return false;
+  const r=cv.getBoundingClientRect();
+  const nd=new THREE.Vector2(((e.clientX-r.left)/r.width)*2-1,-((e.clientY-r.top)/r.height)*2+1);
+  RAY.setFromCamera(nd,camera);
+  const hits=RAY.intersectObjects(stepGroup.children,true);
+  if(!hits.length) return false;
+  const w=hits[0].point;
+  stepGroup.position.x-=w.x; stepGroup.position.y-=w.y; stepGroup.position.z-=w.z;
+  ['stX','stY','stZ'].forEach((id,i)=>document.getElementById(id).value=stepGroup.position.getComponent(i).toFixed(1));
+  document.getElementById('fname').textContent='zero set — picked model point is now X0 Y0 Z0';
+  modelPosChanged(true);
+  return true;
+}
 document.querySelectorAll('#stepbox [data-r]').forEach(b=>b.onclick=()=>{stepGroup.rotation[b.dataset.r]+=Math.PI/2; modelPosChanged(true);});
 ['stX','stY','stZ'].forEach((id,i)=>document.getElementById(id).oninput=e=>{stepGroup.position.setComponent(i,parseFloat(e.target.value)||0); modelPosChanged(false);});
 
@@ -1586,6 +1616,21 @@ $('fxLen').onchange=e=>{ let v=parseFloat(e.target.value); if(!isFinite(v)) v=15
 $('fxB').oninput=e=>fixtureSetB(parseFloat(e.target.value)||0);
 $('fxB0').onclick=()=>{ fixtureSetB(0); if($('sAxis').value!=='Z'){ $('sAxis').value='Z'; stockRefresh(); } };
 $('fxB90').onclick=()=>{ fixtureSetB(90); if($('sAxis').value!=='X'){ $('sAxis').value='X'; stockRefresh(); } };
+$('fxCenter').onclick=()=>{             // center the model on the bar centerline
+  if(!stepGroup.children.length) return;
+  stepGroup.updateMatrixWorld(true);
+  const mb=new THREE.Box3().setFromObject(stepGroup), mc=mb.getCenter(new THREE.Vector3());
+  const r=fixDia()/2;
+  if(FIX.b>=45){                        // horizontal bar: centerline y=0, z=-r
+    stepGroup.position.y+=0-mc.y;
+    stepGroup.position.z+=(-r)-mc.z;
+  } else {                              // vertical bar: centerline x=0, y=0
+    stepGroup.position.x+=0-mc.x;
+    stepGroup.position.y+=0-mc.y;
+  }
+  ['stX','stY','stZ'].forEach((id,i)=>$(id).value=stepGroup.position.getComponent(i).toFixed(1));
+  modelPosChanged(true);
+};
 $('sAxis').addEventListener('change',e=>fixtureSetB(e.target.value==='Z'?0:90));
 $('sDia').addEventListener('change',fixtureBuild);
 $('sTop').addEventListener('change',fixturePlace);

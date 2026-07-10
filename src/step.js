@@ -42,6 +42,7 @@ async function loadSTEP(buf,name){
     }
     stepGroup.userData.mat=mat;
     document.getElementById('stepbox').style.display='block';
+    document.getElementById('drop').style.display='none';
     MODELNAME=name;
     let saved=null; try{ saved=JSON.parse(localStorage.getItem(MODELPOS_KEY(name))||'null'); }catch(_){}
     if(saved&&saved.p){
@@ -61,6 +62,27 @@ async function loadSTEP(buf,name){
 }
 document.getElementById('stOp').oninput=e=>{if(stepGroup.userData.mat)stepGroup.userData.mat.opacity=e.target.value/100;};
 document.getElementById('stShow').onchange=e=>stepGroup.visible=e.target.checked;
+// pick program zero: arm, then click a model point — model shifts so that point = X0 Y0 Z0
+let PICK0=false;
+document.getElementById('stPick').onclick=()=>{
+  PICK0=!PICK0;
+  document.getElementById('stPick').classList.toggle('acc',PICK0);
+  cv.style.cursor=PICK0?'crosshair':'';
+};
+function pickZeroAt(e){
+  if(!stepGroup.children.length) return false;
+  const r=cv.getBoundingClientRect();
+  const nd=new THREE.Vector2(((e.clientX-r.left)/r.width)*2-1,-((e.clientY-r.top)/r.height)*2+1);
+  RAY.setFromCamera(nd,camera);
+  const hits=RAY.intersectObjects(stepGroup.children,true);
+  if(!hits.length) return false;
+  const w=hits[0].point;
+  stepGroup.position.x-=w.x; stepGroup.position.y-=w.y; stepGroup.position.z-=w.z;
+  ['stX','stY','stZ'].forEach((id,i)=>document.getElementById(id).value=stepGroup.position.getComponent(i).toFixed(1));
+  document.getElementById('fname').textContent='zero set — picked model point is now X0 Y0 Z0';
+  modelPosChanged(true);
+  return true;
+}
 document.querySelectorAll('#stepbox [data-r]').forEach(b=>b.onclick=()=>{stepGroup.rotation[b.dataset.r]+=Math.PI/2; modelPosChanged(true);});
 ['stX','stY','stZ'].forEach((id,i)=>document.getElementById(id).oninput=e=>{stepGroup.position.setComponent(i,parseFloat(e.target.value)||0); modelPosChanged(false);});
 

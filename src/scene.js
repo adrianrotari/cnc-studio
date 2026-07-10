@@ -44,6 +44,12 @@ function rayOnZ(e,z0){            // pointer ray ∩ horizontal plane z=z0
 }
 cv.addEventListener('contextmenu',e=>e.preventDefault());
 cv.addEventListener('pointerdown',e=>{
+  if(typeof PICK0!=='undefined'&&PICK0&&e.button===0){
+    if(typeof pickZeroAt!=='undefined') pickZeroAt(e);
+    PICK0=false; cv.style.cursor='';
+    const pb=document.getElementById('stPick'); if(pb) pb.classList.remove('acc');
+    return;
+  }
   if(e.ctrlKey&&e.button===0&&stepGroup&&stepGroup.children.length){
     const z0=stepGroup.position.z;    // Ctrl = move model XY · Ctrl+Shift = move model Z
     drag={mode:'model',sy:e.clientY,z0,hit:rayOnZ(e,z0),p0:stepGroup.position.clone(),sh:e.shiftKey};

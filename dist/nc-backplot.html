@@ -149,11 +149,12 @@
       <div class="row"><button class="btn" id="fxB0" title="bar axis Z, vertical — sets stock sim axis Z">B0 vertical</button><button class="btn" id="fxB90" title="bar axis X, horizontal — sets stock sim axis X">B90 horizontal</button><button class="btn" id="fxCenter" title="center the model on the bar centerline">center in bar</button></div>
     </div>
     <div id="genbox">
-      <b style="color:var(--acc)">Generate — contour rough</b> <span style="color:var(--dim)" title="follows the chuck B angle: B0 slices Z levels (tool axis Z), B90 slices X levels into the bar face (tool axis X)">follows B</span>
-      <div class="row"><label title="B0: Z top · B90: bar face X">top</label><input type="number" id="gZt" value="0" step="0.5"><label title="B0: Z bottom · B90: deepest X">deep</label><input type="number" id="gZb" value="-20" step="0.5"><button class="btn" id="gZfit" title="take the range from the model">fit</button></div>
-      <div class="row"><label>ap</label><input type="number" id="gAp" value="3" step="0.5"><label>ae</label><input type="number" id="gAe" value="8" step="0.5"><label>allow</label><input type="number" id="gAl" value="0.3" step="0.1"></div>
-      <div class="row"><label>fz</label><input type="number" id="gFz" value="0.08" step="0.01"><label>vc</label><input type="number" id="gVc" value="300" step="10"><span style="color:var(--dim)" title="tool ø/z from the TOOL row, bar ø from the STOCK row">uses TOOL ø · bar ø</span></div>
-      <div class="row"><button class="btn grn" id="gGo" title="generate roughing passes from bar ø down to the model silhouette + allowance">generate</button><button class="btn" id="gClr">remove gen ops</button></div>
+      <b style="color:var(--acc)">Generate</b> <span style="color:var(--dim)" title="follows the chuck B angle: B0 slices Z levels (tool axis Z), B90 slices X levels into the bar face (tool axis X)">follows B</span>
+      <div class="row"><span style="color:var(--acc);font-weight:bold">1</span><label>stock</label><span id="gStockSum" style="color:var(--dim)">bar ø— · B—</span><button class="btn" id="gStockGo" title="opens the Chuck + stock panel — bar ø, length, B orientation">set</button></div>
+      <div class="row"><span style="color:var(--acc);font-weight:bold">2</span><label title="target = model silhouette. B0: Z top · B90: bar face X">top</label><input type="number" id="gZt" value="0" step="0.5"><label title="B0: Z bottom · B90: deepest X">deep</label><input type="number" id="gZb" value="-20" step="0.5"><button class="btn" id="gZfit" title="take the range from the model">fit</button><label title="stock left on the model, e.g. 1.00">allow</label><input type="number" id="gAl" value="0.3" step="0.1"></div>
+      <div class="row"><span style="color:var(--acc);font-weight:bold">3</span><label>strategy</label><label title="clear the bar around the model silhouette, outside-in"><input type="radio" name="gStrat" value="contour" checked> contour rough</label><label title="clear cavities inside the model, helical ramp entry, islands kept out"><input type="radio" name="gStrat" value="pocket"> pocket + helix</label></div>
+      <div class="row"><span style="color:var(--acc);font-weight:bold">4</span><label>ap</label><input type="number" id="gAp" value="3" step="0.5"><label>ae</label><input type="number" id="gAe" value="8" step="0.5"><label>fz</label><input type="number" id="gFz" value="0.08" step="0.01"><label>vc</label><input type="number" id="gVc" value="300" step="10"><span style="color:var(--dim)" title="tool ø/z from the TOOL row, bar ø from the STOCK row">TOOL ø · bar ø</span></div>
+      <div class="row"><button class="btn grn" id="gGo" title="generate the selected strategy from stock + silhouette + allowance">generate</button><button class="btn" id="gClr">remove gen ops</button><span id="gNote" style="color:var(--dim)"></span></div>
     </div>
     <div id="toolbox">
       <div class="row"><b style="color:var(--acc)">TOOL LIBRARY</b><button class="btn" id="tbClose">close</button></div>
@@ -10800,6 +10801,155 @@ function genContourRough(tris,opts){
   }
   return segs;
 }
+// ---------- pocket clearing with helical ramp entry ----------
+// Cavities are the inner holes of the deep-nested silhouette at each Z level;
+// islands inside a cavity are carried as holes of the cavity polygon so the
+// kernel keeps passes off them automatically. Tool-center region = cavity
+// shrunk by toolR+allowance. Passes step inward by ae until exhausted and are
+// organized into a containment tree of sub-regions: every leaf sub-region is
+// entered with its own helical ramp (radius <= 0.7*toolR, clamped to what
+// fits), children cut before parents, so nothing is ever straight-plunged.
+// Cavities too tight for the tool are skipped and listed in segs.warnings.
+function genPocketRough(tris,opts){
+  const ap=Math.max(0.2,opts.ap), ae=Math.max(0.2,opts.ae);
+  const toolR=opts.toolR, allow=Math.max(0,opts.allow||0), barR=opts.barR;
+  const zTop=opts.zTop, zBot=opts.zBot;
+  const clearZ=opts.clearZ!=null?opts.clearZ:zTop+5;
+  const f=Math.max(1,opts.feed||500), fp=Math.max(1,opts.plunge||Math.round(f/3));
+  const s=opts.rpm||null;
+  const rampDeg=Math.min(30,Math.max(0.5,opts.rampDeg||3));
+  const cell=opts.cell||Math.max(0.4,Math.min(1.2,barR/120));
+  const R=barR+toolR+ae;
+  const x0=-R-2*cell, y0=-R-2*cell;
+  const nx=Math.ceil((2*(R+2*cell))/cell)+1, ny=nx;
+  if(nx*ny>4.2e6) throw new Error('grid too large — raise cell size');
+  const hf=genHeightfield(tris,x0,y0,nx,ny,cell);
+  const segs=[]; segs.warnings=[]; let last=null;
+  const linkOrRetract=(to,fRate)=>{
+    if(last&&Math.abs(last[2]-to[2])<1e-9&&Math.hypot(to[0]-last[0],to[1]-last[1])<=2.5*ae){
+      segs.push({kind:'feed',pts:[last,to],f,s,line:0,src:'generated'}); last=to; return true;
+    }
+    segs.push({kind:'rapid',pts:last?[last,[last[0],last[1],clearZ],[to[0],to[1],clearZ]]
+                                   :[[to[0],to[1],clearZ]],f:null,s,line:0,src:'generated'});
+    last=[to[0],to[1],clearZ];
+    return false;
+  };
+  const emitLoop=(loop,z)=>{
+    const p3=loop.points.map(p=>[p.x,p.y,z]);
+    if(!loop.open) p3.push([p3[0][0],p3[0][1],z]);
+    if(!linkOrRetract(p3[0])){
+      // arriving from clearZ inside already-cleared floor: feed down the last 0.5
+      segs.push({kind:'rapid',pts:[last,[p3[0][0],p3[0][1],z+0.5]],f:null,s,line:0,src:'generated'});
+      segs.push({kind:'feed',pts:[[p3[0][0],p3[0][1],z+0.5],p3[0]],f:fp,s,line:0,src:'generated'});
+    }
+    segs.push({kind:'feed',pts:p3,f,s,line:0,src:'generated'});
+    last=p3[p3.length-1];
+  };
+  const jtRound=KPOLY.ClipperLib.JoinType.jtRound;
+  const arcTol=Math.max(200,Math.round(0.01*KPOLY.config.clipper));
+  const oOpt=z=>({z,join:jtRound,arc:arcTol,minArea:0.01});
+  // largest inward offset a region still survives (binary probe, ~0.05mm resolution)
+  const fitRadius=(top,rMax,z)=>{
+    let lo=0, hi=rMax;
+    for(let i=0;i<9;i++){
+      const mid=(lo+hi)/2;
+      if(hi-lo<0.05) break;
+      if(KPOLY.offset([top.clone(true)],-mid,oOpt(z)).length) lo=mid; else hi=mid;
+    }
+    return lo;
+  };
+  const levels=[];
+  for(let z=zTop-ap; z>zBot+1e-6; z-=ap) levels.push(+z.toFixed(4));
+  levels.push(zBot);
+  let prevZ=zTop;
+  for(const z of levels){
+    const mask=new Uint8Array(nx*ny);
+    let any=0;
+    for(let k=0;k<nx*ny;k++){ if(hf[k]>z+1e-4){mask[k]=1;any=1;} }
+    if(!any){ prevZ=z; continue; }               // no material — nothing encloses a pocket
+    const D=genDist(mask,nx,ny,cell);
+    const s0=cell*0.75;
+    const loops=genIso(D,nx,ny,x0,y0,cell,s0)
+      .map(run=>{const P=KPOLY.newPolygon(); for(const p of run)P.add(p[0],p[1],z); return P.closeIf(cell*1.6);})
+      .filter(p=>!p.open&&p.area()>0.01);
+    if(!loops.length){ prevZ=z; continue; }
+    // deep nest: tops -> cavity holes -> islands -> sub-cavities ...
+    const tops=KPOLY.nest(loops,true);
+    const cavities=[];
+    (function walk(list){
+      for(const t of list){
+        if(!t.inner) continue;
+        for(const hole of t.inner){
+          const cav=hole.clone(false);
+          if(hole.inner){                        // islands ride along as holes of the cavity
+            cav.inner=hole.inner.map(i2=>i2.clone(false));
+            for(const i2 of cav.inner) i2.parent=cav;
+            walk(hole.inner);                    // recurse for cavities inside islands
+          }
+          cavities.push(cav);
+        }
+      }
+    })(tops);
+    if(!cavities.length){ prevZ=z; continue; }
+    const startP=KPOLY.newPoint(last?last[0]:0,last?last[1]:0,z);
+    const order=cavities.length>1?KPOLY.route(cavities,startP):cavities;
+    const depth=Math.min(ap,prevZ-z)+0.5;
+    for(const cav of order){
+      const region0=KPOLY.offset([cav],-(toolR+allow-s0),oOpt(z));
+      if(!region0.length){
+        segs.warnings.push('pocket at Z'+z.toFixed(2)+' too tight for tool ø'+(2*toolR).toFixed(1)+' + allowance — skipped');
+        continue;
+      }
+      // stages of inward offsets; stage entries are nested tops (holes = island keep-outs)
+      const stages=[region0];
+      for(;;){
+        const nxt=KPOLY.offset(stages[stages.length-1].map(p=>p.clone(true)),-ae,oOpt(z));
+        if(!nxt.length) break;
+        stages.push(nxt);
+        if(stages.length>500) break;
+      }
+      // containment tree over stage tops: parent = containing top one stage out
+      const nodes=[];
+      for(let si=0;si<stages.length;si++)
+        for(const top of stages[si]) nodes.push({top,si,children:[],parent:null});
+      for(const nd of nodes){
+        if(nd.si===0) continue;
+        for(const cand of nodes){
+          if(cand.si!==nd.si-1) continue;
+          if(nd.top.isInside(cand.top,0.01)){ nd.parent=cand; cand.children.push(nd); break; }
+        }
+      }
+      // emit depth-first: children (deeper insets) before their parent ring
+      const emitNode=nd=>{
+        for(const ch of nd.children) emitNode(ch);
+        if(!nd.children.length){
+          // leaf sub-region: helical ramp entry
+          const fit=fitRadius(nd.top,0.7*toolR+0.2,z);
+          const rH=Math.max(0.2,Math.min(0.7*toolR,fit*0.7));
+          let hcSrc=KPOLY.offset([nd.top.clone(true)],-Math.max(0.05,fit*0.9),oOpt(z));
+          const hc=(hcSrc.length?hcSrc[0]:nd.top).average();
+          const pitch=2*Math.PI*rH*Math.tan(rampDeg*Math.PI/180);
+          const turns=Math.max(1,Math.ceil(depth/Math.max(0.05,pitch)));
+          const n=Math.max(24,Math.round(36*turns));
+          const hpts=[];
+          for(let i=0;i<=n;i++){
+            const a2=i*2*Math.PI*turns/n;
+            hpts.push([hc.x+rH*Math.cos(a2),hc.y+rH*Math.sin(a2),z+depth-(depth*i/n)]);
+          }
+          hpts.push([hc.x+rH,hc.y,z]);           // final flat turn closes at depth
+          segs.push({kind:'rapid',pts:last?[last,[last[0],last[1],clearZ],[hpts[0][0],hpts[0][1],clearZ],hpts[0]]
+                                         :[[hpts[0][0],hpts[0][1],clearZ],hpts[0]],f:null,s,line:0,src:'generated'});
+          segs.push({kind:'feed',pts:hpts,f:fp,s,line:0,src:'generated'});
+          last=hpts[hpts.length-1];
+        }
+        for(const loop of nd.top.flattenTo([])) emitLoop(loop,z);
+      };
+      for(const nd of nodes) if(nd.si===0) emitNode(nd);
+    }
+    prevZ=z;
+  }
+  return segs;
+}
 
 // ===== scene.js =====
 // ---------------- 3D scene ----------------
@@ -11135,7 +11285,8 @@ function stepAnim(force){
   while(lo<hi){const mid=(lo+hi>>1); (TL[mid].off+TL[mid].l<tlPos)?lo=mid+1:hi=mid;}
   const e=TL[lo], t=Math.min(1,Math.max(0,(tlPos-e.off)/e.l));
   const p=[e.a[0]+(e.b[0]-e.a[0])*t, e.a[1]+(e.b[1]-e.a[1])*t, e.a[2]+(e.b[2]-e.a[2])*t];
-  setTool(p, e.sec.plane===19?'x':'z');
+  // tool axis follows the op's head orientation: G19 plane or G361 B>=45 -> along X
+  setTool(p, (e.sec.plane===19||Math.abs(e.sec.bOri||0)>=45)?'x':'z');
   if(STK.on&&STK.grid) stampTo(tlPos);
   updateCut(e);
   document.getElementById('readout').innerHTML=
@@ -11878,16 +12029,40 @@ $('bTools').onclick=()=>{
   if(show) toolTableRender();
 };
 $('tbClose').onclick=()=>{ $('toolbox').style.display='none'; };
-// prefill fz/vc from the selected library tool's cut data
+// wizard state: selected strategy + stock summary line
+function genStrategy(){
+  const r=document.querySelector('input[name="gStrat"]:checked');
+  return r?r.value:'contour';
+}
+function genStockSum(){
+  const el=$('gStockSum'); if(!el) return;
+  const dia=parseFloat($('sDia').value)||90;
+  const b=(typeof FIX!=='undefined')?FIX.b:0;
+  el.textContent='bar ø'+dia+' · B'+b.toFixed(0)+(genAxisX()?' · axis X':' · axis Z');
+}
+// prefill fz/vc from the selected library tool's cut data.
+// contour rough = side milling fz; pocket = slot fz (falls back to side, noted)
 function genPrefill(){
   const cd=TOOL.lib?toolCutData(TOOL.lib):null;
+  const note=$('gNote');
   if(cd){
     if(cd.vc) $('gVc').value=cd.vc;
-    const fz=cd.fzSide!=null?cd.fzSide:cd.fzSlot;
+    const strat=genStrategy();
+    let fz;
+    if(strat==='pocket'){
+      fz=cd.fzSlot!=null?cd.fzSlot:cd.fzSide;
+      if(note) note.textContent=cd.fzSlot===null?'tool not rated for slotting — side fz used':'';
+    } else {
+      fz=cd.fzSide!=null?cd.fzSide:cd.fzSlot;
+      if(note) note.textContent='';
+    }
     if(fz!=null) $('gFz').value=fz;
   }
+  genStockSum();
 }
 $('tSel').addEventListener('change',genPrefill);
+document.querySelectorAll('input[name="gStrat"]').forEach(r=>r.addEventListener('change',genPrefill));
+$('genbox').addEventListener('mouseenter',genStockSum);
 function genAxisX(){ return typeof FIX!=='undefined' && FIX.b>=45; }   // B90 -> slice along bar axis X
 $('gZfit').onclick=()=>{
   if(!stepGroup.children.length) return;
@@ -11933,13 +12108,17 @@ $('gGo').onclick=()=>{
     for(let i=0;i<tris.length;i+=3){ t2[i]=tris[i+1]; t2[i+1]=tris[i+2]+barR; t2[i+2]=tris[i]; }
     tris=t2;
   }
+  const strat=genStrategy();
   let segs;
-  try{ segs=genContourRough(tris,{zTop:zT,zBot:zB,ap,ae,toolR,allow,barR,feed,plunge:Math.round(feed/3),rpm}); }
+  try{ segs=(strat==='pocket'?genPocketRough:genContourRough)(
+    tris,{zTop:zT,zBot:zB,ap,ae,toolR,allow,barR,feed,plunge:Math.round(feed/3),rpm,rampDeg:3}); }
   catch(err){ $('fname').textContent='generator: '+err.message; return; }
   if(axX){                     // map back: (X',Y',Z') -> (x=Z', y=X', z=Y'-barR)
     for(const sg of segs) sg.pts=sg.pts.map(p=>[p[2],p[0],p[1]-barR]);
   }
-  if(!segs.length){ $('fname').textContent='generator made no passes — check Z range vs model'; return; }
+  const warns=(segs.warnings&&segs.warnings.length)?segs.warnings:[];
+  if($('gNote')) $('gNote').textContent=warns.length?('⚠ '+warns.join(' · ')):'';
+  if(!segs.length){ $('fname').textContent='generator made no passes — check Z range vs model'+(warns.length?' · '+warns[0]:''); return; }
   let cut=0,rap=0,zMin=1e9,zMax=-1e9;
   for(const sg of segs){
     for(let i=1;i<sg.pts.length;i++){
@@ -11950,9 +12129,10 @@ $('gGo').onclick=()=>{
   }
   const tMin=cut/feed + rap/12000;
   GENCOUNT++;
-  const s={id:1000+GENCOUNT, name:'GEN'+GENCOUNT+' CONTOUR ROUGH ø'+D+(axX?' B-90':' B0'),
-    tool:'GEN', toolTxt:'gen ø'+D, plane:axX?19:17, color:'#ffd166',
-    desc:['generated contour roughing'],
+  const stratName=strat==='pocket'?'POCKET':'CONTOUR ROUGH';
+  const s={id:1000+GENCOUNT, name:'GEN'+GENCOUNT+' '+stratName+' ø'+D+(axX?' B-90':' B0'),
+    tool:'GEN', toolTxt:'gen ø'+D, plane:axX?19:17, bOri:axX?-90:0, color:strat==='pocket'?'#ff9e66':'#ffd166',
+    desc:[strat==='pocket'?'generated pocket clearing (helical entry)':'generated contour roughing'],
     descTxt:'ae '+ae+' · ap '+ap+' · fz '+fz+' · vc '+vc+' · S'+rpm+' · F'+feed+(axX?' · along X':''),
     segs, cutLen:cut, rapLen:rap, tMin, zMin, zMax, calls:[], resolvedCalls:[], isRough12:false};
   SEC.push(s); visible.add(s.id);
@@ -11964,6 +12144,37 @@ $('gClr').onclick=()=>{
   SEC=SEC.filter(x=>x.tool!=='GEN');
   visible=new Set([...visible].filter(id=>SEC.some(x=>x.id===id)));
   buildList(); rebuild3D(); buildTimeline(); updateHud();
+};
+// collapsible bottom-right panels — click the title to fold, state persists
+const PANELCLPS={};
+for(const id of ['stepbox','fixbox','genbox']){
+  const box=$(id); if(!box) continue;
+  const head=box.querySelector('b'); if(!head) continue;
+  const arrow=document.createElement('span');
+  arrow.textContent='▾ ';
+  head.insertBefore(arrow,head.firstChild);
+  head.style.cursor='pointer'; head.style.userSelect='none';
+  if(!head.title) head.title='click to collapse';
+  const KEY='cncstudio.clps.'+id;
+  const apply=c=>{
+    arrow.textContent=c?'▸ ':'▾ ';
+    for(const el of box.children){ if(el.tagName!=='B') el.style.display=c?'none':''; }
+  };
+  const setC=c=>{
+    box._clps=!!c; apply(box._clps);
+    try{ localStorage.setItem(KEY,box._clps?'1':'0'); }catch(_){}
+  };
+  head.onclick=()=>setC(!box._clps);
+  PANELCLPS[id]=setC;
+  let c0=false; try{ c0=localStorage.getItem(KEY)==='1'; }catch(_){}
+  if(c0){ box._clps=true; apply(true); }
+}
+// wizard step 1: jump to the Chuck + stock panel
+$('gStockGo').onclick=()=>{
+  if(PANELCLPS.fixbox) PANELCLPS.fixbox(false);
+  const b=$('fixbox');
+  b.style.outline='1px solid var(--acc)';
+  setTimeout(()=>{ b.style.outline=''; },900);
 };
 
 // ===== main.js =====

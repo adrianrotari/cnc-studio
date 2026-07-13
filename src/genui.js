@@ -26,16 +26,40 @@ $('bTools').onclick=()=>{
   if(show) toolTableRender();
 };
 $('tbClose').onclick=()=>{ $('toolbox').style.display='none'; };
-// prefill fz/vc from the selected library tool's cut data
+// wizard state: selected strategy + stock summary line
+function genStrategy(){
+  const r=document.querySelector('input[name="gStrat"]:checked');
+  return r?r.value:'contour';
+}
+function genStockSum(){
+  const el=$('gStockSum'); if(!el) return;
+  const dia=parseFloat($('sDia').value)||90;
+  const b=(typeof FIX!=='undefined')?FIX.b:0;
+  el.textContent='bar ø'+dia+' · B'+b.toFixed(0)+(genAxisX()?' · axis X':' · axis Z');
+}
+// prefill fz/vc from the selected library tool's cut data.
+// contour rough = side milling fz; pocket = slot fz (falls back to side, noted)
 function genPrefill(){
   const cd=TOOL.lib?toolCutData(TOOL.lib):null;
+  const note=$('gNote');
   if(cd){
     if(cd.vc) $('gVc').value=cd.vc;
-    const fz=cd.fzSide!=null?cd.fzSide:cd.fzSlot;
+    const strat=genStrategy();
+    let fz;
+    if(strat==='pocket'){
+      fz=cd.fzSlot!=null?cd.fzSlot:cd.fzSide;
+      if(note) note.textContent=cd.fzSlot===null?'tool not rated for slotting — side fz used':'';
+    } else {
+      fz=cd.fzSide!=null?cd.fzSide:cd.fzSlot;
+      if(note) note.textContent='';
+    }
     if(fz!=null) $('gFz').value=fz;
   }
+  genStockSum();
 }
 $('tSel').addEventListener('change',genPrefill);
+document.querySelectorAll('input[name="gStrat"]').forEach(r=>r.addEventListener('change',genPrefill));
+$('genbox').addEventListener('mouseenter',genStockSum);
 function genAxisX(){ return typeof FIX!=='undefined' && FIX.b>=45; }   // B90 -> slice along bar axis X
 $('gZfit').onclick=()=>{
   if(!stepGroup.children.length) return;
@@ -81,13 +105,17 @@ $('gGo').onclick=()=>{
     for(let i=0;i<tris.length;i+=3){ t2[i]=tris[i+1]; t2[i+1]=tris[i+2]+barR; t2[i+2]=tris[i]; }
     tris=t2;
   }
+  const strat=genStrategy();
   let segs;
-  try{ segs=genContourRough(tris,{zTop:zT,zBot:zB,ap,ae,toolR,allow,barR,feed,plunge:Math.round(feed/3),rpm}); }
+  try{ segs=(strat==='pocket'?genPocketRough:genContourRough)(
+    tris,{zTop:zT,zBot:zB,ap,ae,toolR,allow,barR,feed,plunge:Math.round(feed/3),rpm,rampDeg:3}); }
   catch(err){ $('fname').textContent='generator: '+err.message; return; }
   if(axX){                     // map back: (X',Y',Z') -> (x=Z', y=X', z=Y'-barR)
     for(const sg of segs) sg.pts=sg.pts.map(p=>[p[2],p[0],p[1]-barR]);
   }
-  if(!segs.length){ $('fname').textContent='generator made no passes — check Z range vs model'; return; }
+  const warns=(segs.warnings&&segs.warnings.length)?segs.warnings:[];
+  if($('gNote')) $('gNote').textContent=warns.length?('⚠ '+warns.join(' · ')):'';
+  if(!segs.length){ $('fname').textContent='generator made no passes — check Z range vs model'+(warns.length?' · '+warns[0]:''); return; }
   let cut=0,rap=0,zMin=1e9,zMax=-1e9;
   for(const sg of segs){
     for(let i=1;i<sg.pts.length;i++){
@@ -98,9 +126,10 @@ $('gGo').onclick=()=>{
   }
   const tMin=cut/feed + rap/12000;
   GENCOUNT++;
-  const s={id:1000+GENCOUNT, name:'GEN'+GENCOUNT+' CONTOUR ROUGH ø'+D+(axX?' B-90':' B0'),
-    tool:'GEN', toolTxt:'gen ø'+D, plane:axX?19:17, color:'#ffd166',
-    desc:['generated contour roughing'],
+  const stratName=strat==='pocket'?'POCKET':'CONTOUR ROUGH';
+  const s={id:1000+GENCOUNT, name:'GEN'+GENCOUNT+' '+stratName+' ø'+D+(axX?' B-90':' B0'),
+    tool:'GEN', toolTxt:'gen ø'+D, plane:axX?19:17, bOri:axX?-90:0, color:strat==='pocket'?'#ff9e66':'#ffd166',
+    desc:[strat==='pocket'?'generated pocket clearing (helical entry)':'generated contour roughing'],
     descTxt:'ae '+ae+' · ap '+ap+' · fz '+fz+' · vc '+vc+' · S'+rpm+' · F'+feed+(axX?' · along X':''),
     segs, cutLen:cut, rapLen:rap, tMin, zMin, zMax, calls:[], resolvedCalls:[], isRough12:false};
   SEC.push(s); visible.add(s.id);
@@ -112,4 +141,35 @@ $('gClr').onclick=()=>{
   SEC=SEC.filter(x=>x.tool!=='GEN');
   visible=new Set([...visible].filter(id=>SEC.some(x=>x.id===id)));
   buildList(); rebuild3D(); buildTimeline(); updateHud();
+};
+// collapsible bottom-right panels — click the title to fold, state persists
+const PANELCLPS={};
+for(const id of ['stepbox','fixbox','genbox']){
+  const box=$(id); if(!box) continue;
+  const head=box.querySelector('b'); if(!head) continue;
+  const arrow=document.createElement('span');
+  arrow.textContent='▾ ';
+  head.insertBefore(arrow,head.firstChild);
+  head.style.cursor='pointer'; head.style.userSelect='none';
+  if(!head.title) head.title='click to collapse';
+  const KEY='cncstudio.clps.'+id;
+  const apply=c=>{
+    arrow.textContent=c?'▸ ':'▾ ';
+    for(const el of box.children){ if(el.tagName!=='B') el.style.display=c?'none':''; }
+  };
+  const setC=c=>{
+    box._clps=!!c; apply(box._clps);
+    try{ localStorage.setItem(KEY,box._clps?'1':'0'); }catch(_){}
+  };
+  head.onclick=()=>setC(!box._clps);
+  PANELCLPS[id]=setC;
+  let c0=false; try{ c0=localStorage.getItem(KEY)==='1'; }catch(_){}
+  if(c0){ box._clps=true; apply(true); }
+}
+// wizard step 1: jump to the Chuck + stock panel
+$('gStockGo').onclick=()=>{
+  if(PANELCLPS.fixbox) PANELCLPS.fixbox(false);
+  const b=$('fixbox');
+  b.style.outline='1px solid var(--acc)';
+  setTimeout(()=>{ b.style.outline=''; },900);
 };

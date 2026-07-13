@@ -201,4 +201,153 @@ function genContourRough(tris,opts){
   }
   return segs;
 }
-if(typeof module!=='undefined'&&module.exports){ module.exports={genHeightfield,genDist,genIso,genContourRough}; }
+// ---------- pocket clearing with helical ramp entry ----------
+// Cavities are the inner holes of the deep-nested silhouette at each Z level;
+// islands inside a cavity are carried as holes of the cavity polygon so the
+// kernel keeps passes off them automatically. Tool-center region = cavity
+// shrunk by toolR+allowance. Passes step inward by ae until exhausted and are
+// organized into a containment tree of sub-regions: every leaf sub-region is
+// entered with its own helical ramp (radius <= 0.7*toolR, clamped to what
+// fits), children cut before parents, so nothing is ever straight-plunged.
+// Cavities too tight for the tool are skipped and listed in segs.warnings.
+function genPocketRough(tris,opts){
+  const ap=Math.max(0.2,opts.ap), ae=Math.max(0.2,opts.ae);
+  const toolR=opts.toolR, allow=Math.max(0,opts.allow||0), barR=opts.barR;
+  const zTop=opts.zTop, zBot=opts.zBot;
+  const clearZ=opts.clearZ!=null?opts.clearZ:zTop+5;
+  const f=Math.max(1,opts.feed||500), fp=Math.max(1,opts.plunge||Math.round(f/3));
+  const s=opts.rpm||null;
+  const rampDeg=Math.min(30,Math.max(0.5,opts.rampDeg||3));
+  const cell=opts.cell||Math.max(0.4,Math.min(1.2,barR/120));
+  const R=barR+toolR+ae;
+  const x0=-R-2*cell, y0=-R-2*cell;
+  const nx=Math.ceil((2*(R+2*cell))/cell)+1, ny=nx;
+  if(nx*ny>4.2e6) throw new Error('grid too large — raise cell size');
+  const hf=genHeightfield(tris,x0,y0,nx,ny,cell);
+  const segs=[]; segs.warnings=[]; let last=null;
+  const linkOrRetract=(to,fRate)=>{
+    if(last&&Math.abs(last[2]-to[2])<1e-9&&Math.hypot(to[0]-last[0],to[1]-last[1])<=2.5*ae){
+      segs.push({kind:'feed',pts:[last,to],f,s,line:0,src:'generated'}); last=to; return true;
+    }
+    segs.push({kind:'rapid',pts:last?[last,[last[0],last[1],clearZ],[to[0],to[1],clearZ]]
+                                   :[[to[0],to[1],clearZ]],f:null,s,line:0,src:'generated'});
+    last=[to[0],to[1],clearZ];
+    return false;
+  };
+  const emitLoop=(loop,z)=>{
+    const p3=loop.points.map(p=>[p.x,p.y,z]);
+    if(!loop.open) p3.push([p3[0][0],p3[0][1],z]);
+    if(!linkOrRetract(p3[0])){
+      // arriving from clearZ inside already-cleared floor: feed down the last 0.5
+      segs.push({kind:'rapid',pts:[last,[p3[0][0],p3[0][1],z+0.5]],f:null,s,line:0,src:'generated'});
+      segs.push({kind:'feed',pts:[[p3[0][0],p3[0][1],z+0.5],p3[0]],f:fp,s,line:0,src:'generated'});
+    }
+    segs.push({kind:'feed',pts:p3,f,s,line:0,src:'generated'});
+    last=p3[p3.length-1];
+  };
+  const jtRound=KPOLY.ClipperLib.JoinType.jtRound;
+  const arcTol=Math.max(200,Math.round(0.01*KPOLY.config.clipper));
+  const oOpt=z=>({z,join:jtRound,arc:arcTol,minArea:0.01});
+  // largest inward offset a region still survives (binary probe, ~0.05mm resolution)
+  const fitRadius=(top,rMax,z)=>{
+    let lo=0, hi=rMax;
+    for(let i=0;i<9;i++){
+      const mid=(lo+hi)/2;
+      if(hi-lo<0.05) break;
+      if(KPOLY.offset([top.clone(true)],-mid,oOpt(z)).length) lo=mid; else hi=mid;
+    }
+    return lo;
+  };
+  const levels=[];
+  for(let z=zTop-ap; z>zBot+1e-6; z-=ap) levels.push(+z.toFixed(4));
+  levels.push(zBot);
+  let prevZ=zTop;
+  for(const z of levels){
+    const mask=new Uint8Array(nx*ny);
+    let any=0;
+    for(let k=0;k<nx*ny;k++){ if(hf[k]>z+1e-4){mask[k]=1;any=1;} }
+    if(!any){ prevZ=z; continue; }               // no material — nothing encloses a pocket
+    const D=genDist(mask,nx,ny,cell);
+    const s0=cell*0.75;
+    const loops=genIso(D,nx,ny,x0,y0,cell,s0)
+      .map(run=>{const P=KPOLY.newPolygon(); for(const p of run)P.add(p[0],p[1],z); return P.closeIf(cell*1.6);})
+      .filter(p=>!p.open&&p.area()>0.01);
+    if(!loops.length){ prevZ=z; continue; }
+    // deep nest: tops -> cavity holes -> islands -> sub-cavities ...
+    const tops=KPOLY.nest(loops,true);
+    const cavities=[];
+    (function walk(list){
+      for(const t of list){
+        if(!t.inner) continue;
+        for(const hole of t.inner){
+          const cav=hole.clone(false);
+          if(hole.inner){                        // islands ride along as holes of the cavity
+            cav.inner=hole.inner.map(i2=>i2.clone(false));
+            for(const i2 of cav.inner) i2.parent=cav;
+            walk(hole.inner);                    // recurse for cavities inside islands
+          }
+          cavities.push(cav);
+        }
+      }
+    })(tops);
+    if(!cavities.length){ prevZ=z; continue; }
+    const startP=KPOLY.newPoint(last?last[0]:0,last?last[1]:0,z);
+    const order=cavities.length>1?KPOLY.route(cavities,startP):cavities;
+    const depth=Math.min(ap,prevZ-z)+0.5;
+    for(const cav of order){
+      const region0=KPOLY.offset([cav],-(toolR+allow-s0),oOpt(z));
+      if(!region0.length){
+        segs.warnings.push('pocket at Z'+z.toFixed(2)+' too tight for tool ø'+(2*toolR).toFixed(1)+' + allowance — skipped');
+        continue;
+      }
+      // stages of inward offsets; stage entries are nested tops (holes = island keep-outs)
+      const stages=[region0];
+      for(;;){
+        const nxt=KPOLY.offset(stages[stages.length-1].map(p=>p.clone(true)),-ae,oOpt(z));
+        if(!nxt.length) break;
+        stages.push(nxt);
+        if(stages.length>500) break;
+      }
+      // containment tree over stage tops: parent = containing top one stage out
+      const nodes=[];
+      for(let si=0;si<stages.length;si++)
+        for(const top of stages[si]) nodes.push({top,si,children:[],parent:null});
+      for(const nd of nodes){
+        if(nd.si===0) continue;
+        for(const cand of nodes){
+          if(cand.si!==nd.si-1) continue;
+          if(nd.top.isInside(cand.top,0.01)){ nd.parent=cand; cand.children.push(nd); break; }
+        }
+      }
+      // emit depth-first: children (deeper insets) before their parent ring
+      const emitNode=nd=>{
+        for(const ch of nd.children) emitNode(ch);
+        if(!nd.children.length){
+          // leaf sub-region: helical ramp entry
+          const fit=fitRadius(nd.top,0.7*toolR+0.2,z);
+          const rH=Math.max(0.2,Math.min(0.7*toolR,fit*0.7));
+          let hcSrc=KPOLY.offset([nd.top.clone(true)],-Math.max(0.05,fit*0.9),oOpt(z));
+          const hc=(hcSrc.length?hcSrc[0]:nd.top).average();
+          const pitch=2*Math.PI*rH*Math.tan(rampDeg*Math.PI/180);
+          const turns=Math.max(1,Math.ceil(depth/Math.max(0.05,pitch)));
+          const n=Math.max(24,Math.round(36*turns));
+          const hpts=[];
+          for(let i=0;i<=n;i++){
+            const a2=i*2*Math.PI*turns/n;
+            hpts.push([hc.x+rH*Math.cos(a2),hc.y+rH*Math.sin(a2),z+depth-(depth*i/n)]);
+          }
+          hpts.push([hc.x+rH,hc.y,z]);           // final flat turn closes at depth
+          segs.push({kind:'rapid',pts:last?[last,[last[0],last[1],clearZ],[hpts[0][0],hpts[0][1],clearZ],hpts[0]]
+                                         :[[hpts[0][0],hpts[0][1],clearZ],hpts[0]],f:null,s,line:0,src:'generated'});
+          segs.push({kind:'feed',pts:hpts,f:fp,s,line:0,src:'generated'});
+          last=hpts[hpts.length-1];
+        }
+        for(const loop of nd.top.flattenTo([])) emitLoop(loop,z);
+      };
+      for(const nd of nodes) if(nd.si===0) emitNode(nd);
+    }
+    prevZ=z;
+  }
+  return segs;
+}
+if(typeof module!=='undefined'&&module.exports){ module.exports={genHeightfield,genDist,genIso,genContourRough,genPocketRough}; }

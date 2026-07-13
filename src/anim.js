@@ -35,7 +35,8 @@ function stepAnim(force){
   while(lo<hi){const mid=(lo+hi>>1); (TL[mid].off+TL[mid].l<tlPos)?lo=mid+1:hi=mid;}
   const e=TL[lo], t=Math.min(1,Math.max(0,(tlPos-e.off)/e.l));
   const p=[e.a[0]+(e.b[0]-e.a[0])*t, e.a[1]+(e.b[1]-e.a[1])*t, e.a[2]+(e.b[2]-e.a[2])*t];
-  setTool(p, e.sec.plane===19?'x':'z');
+  // tool axis follows the op's head orientation: G19 plane or G361 B>=45 -> along X
+  setTool(p, (e.sec.plane===19||Math.abs(e.sec.bOri||0)>=45)?'x':'z');
   if(STK.on&&STK.grid) stampTo(tlPos);
   updateCut(e);
   document.getElementById('readout').innerHTML=

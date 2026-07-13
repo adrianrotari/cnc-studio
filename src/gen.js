@@ -1,9 +1,17 @@
 // ---------- pure toolpath generator (no DOM, node-testable) ----------
 // Contour roughing around a billet, tool axis Z (G17). At each Z level the
-// keep-out is the model silhouette (top-surface heightfield) at that depth;
-// passes are iso-distance contours of the keep-out stepped by ae, clipped to
-// the bar, outermost first. 2.5D assumption: no undercuts.
+// keep-out is the model silhouette (top-surface heightfield) at that depth.
+// The silhouette is extracted once per level from the raster (marching
+// squares on a chamfer distance field), then all pass geometry is exact:
+// the POLY kernel (ported Kiri:Moto math over Clipper) offsets the
+// silhouette by toolR+allowance and steps outward by ae, and each ring is
+// clipped to the bar with an open-path boolean instead of point culling.
+// Islands smaller than ~0.1 mm across fall below the kernel minArea filter
+// and are ignored. 2.5D assumption: no undercuts.
 // tris: flat [x,y,z]*3n in program coords. Returns [{kind,pts,f,s,line,src}].
+// POLY resolve: bare global in the browser bundle (poly.js precedes this
+// file), required directly when running under node.
+const KPOLY = (typeof POLY !== 'undefined') ? POLY : require('./poly.js').POLY;
 function genHeightfield(tris,x0,y0,nx,ny,cell){
   const hf=new Float32Array(nx*ny).fill(-Infinity);
   const n=Math.floor(tris.length/9);
@@ -110,15 +118,6 @@ function genIso(D,nx,ny,x0,y0,cell,iso){
   }
   return polys;
 }
-function genClipRuns(poly,maxR){
-  const runs=[]; let cur=[];
-  for(const p of poly){
-    if(Math.hypot(p[0],p[1])<=maxR) cur.push(p);
-    else { if(cur.length>1) runs.push(cur); cur=[]; }
-  }
-  if(cur.length>1) runs.push(cur);
-  return runs;
-}
 function genContourRough(tris,opts){
   const ap=Math.max(0.2,opts.ap), ae=Math.max(0.2,opts.ae);
   const toolR=opts.toolR, allow=Math.max(0,opts.allow||0), barR=opts.barR;
@@ -143,14 +142,19 @@ function genContourRough(tris,opts){
     segs.push({kind:'feed',pts:[[to[0],to[1],to[2]+0.5],to],f:fp,s,line:0,src:'generated'});
     last=to;
   };
-  const emitRing=(pts2,z)=>{
+  const emitRing=(pts2,z,closed)=>{
     const p3=pts2.map(p=>[p[0],p[1],z]);
-    if(Math.hypot(p3[0][0]-p3[p3.length-1][0],p3[0][1]-p3[p3.length-1][1])<cell*1.6)
+    if(closed||Math.hypot(p3[0][0]-p3[p3.length-1][0],p3[0][1]-p3[p3.length-1][1])<cell*1.6)
       p3.push([p3[0][0],p3[0][1],z]);         // close the loop
     jump(p3[0]);
     segs.push({kind:'feed',pts:p3,f,s,line:0,src:'generated'});
     last=p3[p3.length-1];
   };
+  // bar clip boundary in tool-center space (72-seg circle like the face rings)
+  const disk=KPOLY.newPolygon().centerCircle({x:0,y:0,z:0},maxR,72,false);
+  const jtRound=KPOLY.ClipperLib.JoinType.jtRound;
+  const arcTol=Math.max(200,Math.round(0.01*KPOLY.config.clipper));  // ~0.01mm arc facets
+  const kMax=Math.ceil(2*R/ae)+2;
   const levels=[];
   for(let z=zTop-ap; z>zBot+1e-6; z-=ap) levels.push(+z.toFixed(4));
   levels.push(zBot);
@@ -165,14 +169,34 @@ function genContourRough(tris,opts){
       }
       continue;
     }
+    // silhouette: one marching-squares pass just off the mask, then exact offsets
     const D=genDist(mask,nx,ny,cell);
-    const kMax=Math.ceil(2*R/ae);
-    for(let k2=kMax;k2>=0;k2--){
-      const iso=toolR+allow+k2*ae;
-      const polys=genIso(D,nx,ny,x0,y0,cell,iso);
-      for(const poly of polys)
-        for(const run of genClipRuns(poly,maxR))
-          emitRing(run,z);
+    const s0=cell*0.75;
+    const silh=genIso(D,nx,ny,x0,y0,cell,s0)
+      .map(run=>{const P=KPOLY.newPolygon(); for(const p of run)P.add(p[0],p[1],z); return P.closeIf(cell*1.6);})
+      .filter(p=>!p.open&&p.area()>0.01);
+    if(!silh.length) continue;
+    const base=KPOLY.union(silh,0.01,true);
+    // ring 0 sits at exactly toolR+allow from the (raster) silhouette
+    let cur=KPOLY.offset(base,toolR+allow-s0,{z,join:jtRound,arc:arcTol,minArea:0.01});
+    const ringSets=[];
+    for(let k=0;k<=kMax&&cur.length;k++){
+      const loops=KPOLY.flatten(cur,[]);
+      const clipped=[];
+      for(const loop of loops){
+        const lp=loop.clone(false).setOpenValue(loop.open);
+        if(lp.isInside(disk)){ clipped.push(lp); continue; }
+        const cuts=lp.cut([disk],true);
+        if(cuts&&cuts.length) for(const c of cuts) if(c.length>1) clipped.push(c);
+      }
+      if(!clipped.length) break;               // fully outside the bar — done
+      ringSets.push(clipped);
+      cur=KPOLY.offset(cur,ae,{z,join:jtRound,arc:arcTol,minArea:0.01});
+    }
+    for(let k=ringSets.length-1;k>=0;k--){      // outermost first
+      for(const loop of ringSets[k]){
+        emitRing(loop.points.map(p=>[p.x,p.y]),z,!loop.open);
+      }
     }
   }
   return segs;

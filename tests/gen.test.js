@@ -36,5 +36,21 @@ ok(rmax<=51.01,'passes stay within bar radius + toolR (max '+rmax.toFixed(1)+')'
 // empty level fallback: no model above -1 in a 10mm bar
 const segs2=genContourRough([],{zTop:0,zBot:-2,ap:2,ae:4,toolR:3,allow:0,barR:10,feed:1000,rpm:5000});
 ok(segs2.some(sg=>sg.kind==='feed'&&sg.pts.length>10),'face-clearing fallback rings');
+// two islands: rings union as offsets meet, none enter either island
+const tris3=[
+  -35,-10,0, -15,-10,0, -15,10,0,  -35,-10,0, -15,10,0, -35,10,0,   // island A: x -35..-15
+   15,-10,0,  35,-10,0,  35,10,0,   15,-10,0,  35,10,0,  15,10,0    // island B: x 15..35
+];
+const segs3=genContourRough(tris3,{zTop:0,zBot:-3,ap:3,ae:6,toolR:5,allow:0,barR:45,feed:2000,rpm:6000});
+const inA=p=>p[0]>=-35&&p[0]<=-15&&Math.abs(p[1])<=10;
+const inB=p=>p[0]>=15&&p[0]<=35&&Math.abs(p[1])<=10;
+let hit=false, rings3=0;
+for(const sg of segs3){
+  if(sg.kind!=='feed')continue;
+  if(sg.pts.length>10)rings3++;
+  for(const p of sg.pts){ if(inA(p)||inB(p)) hit=true; }
+}
+ok(rings3>=4,'two-island: rings generated (got '+rings3+')');
+ok(!hit,'two-island: no pass enters either island');
 console.log('gen tests:',pass,'passed,',fail,'failed');
 process.exit(fail?1:0);

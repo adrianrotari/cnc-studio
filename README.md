@@ -44,6 +44,9 @@ and later generate simple 2.5D toolpaths.
 ```
 src/shell.html    UI markup + CSS, /*__APP_JS__*/ marker
 src/parser.js     pure ISO parser (node-testable, no DOM)
+src/poly.js       2D polygon kernel ported from Kiri:Moto (offset/boolean/nesting
+                  over Clipper; node-testable, no DOM) — powers the CAM engine
+src/gen.js        pure toolpath generator (contour roughing on the kernel)
 src/scene.js      three.js scene, orbit, parametric tool
 src/app.js        op list, path rendering, hud
 src/anim.js       timeline + animation loop
@@ -51,6 +54,7 @@ src/step.js       STEP import + file routing
 src/chat.js       Claude chat (direct API, image attach)
 src/stock.js      2.5D stock sim + cut data + auto-align
 src/main.js       boot
+vendor/clip2.js   Clipper 6.4.2 (Boost license), vendored verbatim
 build.js          concat modules → dist/nc-backplot.html
 tests/            node tests (no fixtures from customer data)
 ```

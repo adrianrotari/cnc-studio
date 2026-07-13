@@ -6,21 +6,30 @@ Browser-based CNC program analyzer. Single-file deliverable built from plain-scr
 
 - Build: `node build.js` → `dist/nc-backplot.html`
 - Test: `node tests/parser.test.js` (must stay green)
-- No bundler, no npm dependencies. three.js and occt-import-js come from CDN at runtime.
+- No bundler, no npm dependencies. three.js and occt-import-js come from CDN at runtime;
+  Clipper is vendored at `vendor/clip2.js` (Boost license, do not hand-edit).
 
 ## Architecture — read before editing
 
 `src/*.js` are NOT ES modules. They are plain script fragments sharing one top-level
-scope, concatenated by `build.js` in a fixed order (parser → geom → tools → gen → scene →
-app → anim → step → chat → stock → fixture → genui → main). Cross-module references are
-bare globals. Do not reorder, do not add import/export, do not introduce duplicate
-top-level names. ES-module migration is allowed only as a dedicated refactor with
-browser testing.
+scope, concatenated by `build.js` in a fixed order (parser → geom → tools → clip2 →
+poly → gen → scene → app → anim → step → chat → stock → fixture → genui → main).
+Cross-module references are bare globals. Do not reorder, do not add import/export,
+do not introduce duplicate top-level names. ES-module migration is allowed only as a
+dedicated refactor with browser testing.
 
-`src/parser.js`, `src/geom.js`, `src/tools.js` and `src/gen.js` are pure (no DOM) and
-node-testable — keep them that way.
+`vendor/clip2.js` is third-party (Clipper 6.4.2 as shipped in grid-apps) — build.js
+resolves ORDER entries against src/ first, then vendor/. It defines the bare global
+`ClipperLib`. `src/poly.js` is the 2D polygon kernel ported from Kiri:Moto (MIT,
+Stewart Allen) — it defines exactly ONE top-level name, `POLY`, and resolves
+ClipperLib from the global (browser) or via require (node). `src/gen.js` resolves
+POLY the same way through its local `KPOLY` binding. Keep PORT: comments when
+editing poly.js — they mark deviations from the Kiri source.
+
+`src/parser.js`, `src/geom.js`, `src/tools.js`, `src/poly.js` and `src/gen.js` are
+pure (no DOM) and node-testable — keep them that way.
 The `/*__PARSER_START__*/ ... /*__PARSER_END__*/` markers are used by tooling; keep them.
-Tests: `node tests/{parser,geom,tools,gen}.test.js` (all must stay green).
+Tests: `node tests/{parser,geom,tools,poly,gen}.test.js` (all must stay green).
 Pure modules must keep the node export shim on ONE line, e.g.
 `if(typeof module!=='undefined'&&module.exports){ module.exports={...}; }` — `build.js`
 strips it with a single-line regex, so a multi-line shim leaves a dangling `}` that
